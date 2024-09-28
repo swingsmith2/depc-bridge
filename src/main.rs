@@ -1,3 +1,5 @@
+mod chain;
+
 use clap::{command, Parser};
 
 #[derive(Debug, Parser)]
@@ -11,6 +13,7 @@ struct Args {
     local_db: String,
 }
 
-fn main() {
-    let _ = Args::parse();
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
 }
