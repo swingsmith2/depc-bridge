@@ -3,7 +3,7 @@ use serde_json::{Error, Value};
 
 #[derive(Deserialize)]
 pub struct RpcResp {
-    pub jsonrpc: String,
+    pub jsonrpc: Option<String>,
     pub id: u32,
     pub result: Value,
 }
@@ -24,7 +24,10 @@ mod test {
     fn test_rpc_resp_parse_json_rpc() {
         assert!(parse_str(STANDARD_JSON_RPC).is_ok());
         assert_eq!(parse_str(STANDARD_JSON_RPC).unwrap().id, 0);
-        assert_eq!(parse_str(STANDARD_JSON_RPC).unwrap().jsonrpc, "2.0");
+        assert_eq!(
+            parse_str(STANDARD_JSON_RPC).unwrap().jsonrpc,
+            Some("2.0".to_owned())
+        );
         assert_eq!(parse_str(STANDARD_JSON_RPC).unwrap().result, "hello world");
     }
 }

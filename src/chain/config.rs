@@ -1,6 +1,7 @@
 pub struct Config {
     pub endpoint: String,
     pub use_proxy: bool,
+    pub auth: Option<String>,
 }
 
 impl Config {
@@ -8,6 +9,7 @@ impl Config {
         Config {
             endpoint: "127.0.0.1:18732".to_owned(),
             use_proxy: true,
+            auth: None,
         }
     }
 
