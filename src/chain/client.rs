@@ -2,7 +2,7 @@ use std::fs;
 
 use anyhow::Result;
 
-use super::{request, Auth, Config, RpcJsonBuilder};
+use super::{request, Config, RpcJsonBuilder};
 
 pub struct Client {
     config: Config,
@@ -41,16 +41,14 @@ impl ClientBuilder {
         self
     }
 
-    pub fn set_auth(mut self, user: &str, passwd: &str) -> ClientBuilder {
-        let auth_str = format!("{user}:{passwd}");
+    pub fn set_auth(mut self, auth_str: &str) -> ClientBuilder {
         self.auth = Some(format!("Basic {}", rbase64::encode(auth_str.as_bytes())));
         self
     }
 
     pub fn set_auth_from_cookie(mut self, cookie_path: &str) -> ClientBuilder {
         let auth_str = fs::read_to_string(cookie_path).unwrap();
-        let auth: Auth = auth_str.try_into().unwrap();
-        self.set_auth(&auth.user, &auth.passwd)
+        self.set_auth(&auth_str)
     }
 
     pub fn build(self) -> Client {
