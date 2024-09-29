@@ -51,6 +51,15 @@ impl ClientBuilder {
         self.set_auth(&auth_str)
     }
 
+    pub fn set_auth_from_default_cookie(mut self, testnet3: bool) -> ClientBuilder {
+        let cookie_path = if testnet3 {
+            shellexpand::env("$HOME/.depinc/testnet3/.cookie").unwrap()
+        } else {
+            shellexpand::env("$HOME/.depinc/.cookie").unwrap()
+        };
+        self.set_auth_from_cookie(&cookie_path)
+    }
+
     pub fn build(self) -> Client {
         Client {
             config: Config {
@@ -68,11 +77,8 @@ mod tests {
 
     #[test]
     fn test_get_height() {
-        // the cookie file for testnet
-        let cookie_path = shellexpand::env("$HOME/.depinc/testnet3/.cookie").unwrap();
-
         let builder = ClientBuilder::new();
-        let client = builder.set_auth_from_cookie(&cookie_path).build();
+        let client = builder.set_auth_from_default_cookie(true).build();
         let height = client.get_height().unwrap();
         assert_ne!(height, 0);
     }
