@@ -1,4 +1,10 @@
+use serde::Deserialize;
+
+#[derive(Deserialize)]
 pub struct Block {
-    pub block_hash: String,
-    pub tx_hashes: Vec<String>,
+    pub hash: String,
+    pub height: u32,
+    pub miner: String,
+    pub time: u64,
+    pub tx: Vec<String>,
 }
