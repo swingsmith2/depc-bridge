@@ -53,6 +53,13 @@ impl RpcJsonBuilder {
         self
     }
 
+    pub fn add_param_bool(mut self, name: &str, value: bool) -> RpcJsonBuilder {
+        self.rpc_json
+            .params
+            .insert(name.to_owned(), Value::Bool(value));
+        self
+    }
+
     pub fn build(self) -> RpcJson {
         // TODO we might need to ensure `rpc_json` is valid
         self.rpc_json

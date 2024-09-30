@@ -2,7 +2,7 @@ use std::fs;
 
 use log::error;
 
-use super::{req, Block, Config, Error, RpcJsonBuilder};
+use super::{req, Block, Config, Error, RpcJsonBuilder, Transaction};
 
 pub struct Client {
     config: Config,
@@ -48,6 +48,21 @@ impl Client {
             }
         }
     }
+
+    pub fn get_transaction(&self, txid: &str) -> Result<Transaction, Error> {
+        let rpc_json = RpcJsonBuilder::new()
+            .set_method("getrawtransaction")
+            .add_param_string("txid", txid)
+            .add_param_bool("verbose", true)
+            .build();
+        match req(&self.config, &rpc_json) {
+            Ok(resp) => Ok(serde_json::from_value(resp.result).unwrap()),
+            Err(e) => {
+                error!("cannot execute `getblock`, reason: {e}");
+                Err(Error::General)
+            }
+        }
+    }
 }
 
 pub struct ClientBuilder {
@@ -80,12 +95,12 @@ impl ClientBuilder {
         self
     }
 
-    pub fn set_auth_from_cookie(mut self, cookie_path: &str) -> ClientBuilder {
+    pub fn set_auth_from_cookie(self, cookie_path: &str) -> ClientBuilder {
         let auth_str = fs::read_to_string(cookie_path).unwrap();
         self.set_auth(&auth_str)
     }
 
-    pub fn set_auth_from_default_cookie(mut self, testnet3: bool) -> ClientBuilder {
+    pub fn set_auth_from_default_cookie(self, testnet3: bool) -> ClientBuilder {
         let cookie_path = if testnet3 {
             shellexpand::env("$HOME/.depinc/testnet3/.cookie").unwrap()
         } else {
@@ -142,5 +157,44 @@ mod tests {
         assert_eq!(block.miner, "2NGWAccrksGM4TmefLN4qyW1kV7VpMngtBQ");
         assert_eq!(block.time, 1531302789);
         assert_eq!(block.tx.len(), 1);
+    }
+
+    #[test]
+    fn test_get_transaction_838b6158772219d547df240b005c3572c9f15fba0f29be3a92b0e4326c2b33e0() {
+        let builder = ClientBuilder::new();
+        let client = builder.set_auth_from_default_cookie(true).build();
+        let transaction = client
+            .get_transaction("838b6158772219d547df240b005c3572c9f15fba0f29be3a92b0e4326c2b33e0")
+            .unwrap();
+        assert_eq!(
+            transaction.txid,
+            "838b6158772219d547df240b005c3572c9f15fba0f29be3a92b0e4326c2b33e0"
+        );
+        assert_eq!(transaction.vin.len(), 1);
+        assert_eq!(transaction.vout.len(), 3);
+        assert_eq!(transaction.vout.get(1).unwrap().value, 25.0f64);
+    }
+
+    #[test]
+    fn test_get_transaction_751cbbfefdd1e78950f1e69c79ec96babc3bb44737c587fdd49f86afa6c6234b() {
+        let builder = ClientBuilder::new();
+        let client = builder.set_auth_from_default_cookie(true).build();
+        let transaction = client
+            .get_transaction("751cbbfefdd1e78950f1e69c79ec96babc3bb44737c587fdd49f86afa6c6234b")
+            .unwrap();
+        assert_eq!(
+            transaction.txid,
+            "751cbbfefdd1e78950f1e69c79ec96babc3bb44737c587fdd49f86afa6c6234b"
+        );
+        if let Some(in_rec) = transaction.vin.get(0) {
+            if let Some(txid) = &in_rec.txid {
+                assert_eq!(
+                    txid,
+                    "480211584a1b7588e94efb02fe7e4e3e5fd1a4ed931d046e2801ba596a634c06"
+                );
+            }
+            return;
+        }
+        assert!(false);
     }
 }
