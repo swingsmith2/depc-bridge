@@ -1,3 +1,4 @@
-pub enum ChainError {
+#[derive(Debug)]
+pub enum Error {
     General,
 }

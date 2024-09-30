@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::vec::Vec;
 
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Serialize)]
 pub struct RpcJson {
     jsonrpc: String,
     method: String,
-    params: Vec<String>,
+    params: HashMap<String, Value>,
     id: u32,
 }
 
@@ -20,7 +23,7 @@ impl RpcJsonBuilder {
             rpc_json: RpcJson {
                 jsonrpc: "2.0".to_owned(),
                 method: "".to_owned(),
-                params: vec![],
+                params: HashMap::new(),
                 id: 0,
             },
         }
@@ -36,13 +39,17 @@ impl RpcJsonBuilder {
         self
     }
 
-    pub fn add_param_i64(mut self, value: i64) -> RpcJsonBuilder {
-        self.rpc_json.params.push(value.to_string());
+    pub fn add_param_i64(mut self, name: &str, value: i64) -> RpcJsonBuilder {
+        self.rpc_json
+            .params
+            .insert(name.to_owned(), Value::Number(value.into()));
         self
     }
 
-    pub fn add_param_string(mut self, value: &str) -> RpcJsonBuilder {
-        self.rpc_json.params.push(value.to_owned());
+    pub fn add_param_string(mut self, name: &str, value: &str) -> RpcJsonBuilder {
+        self.rpc_json
+            .params
+            .insert(name.to_owned(), Value::String(value.to_owned()));
         self
     }
 
@@ -66,21 +73,21 @@ mod test {
     #[test]
     fn test_rpc_json_builder_add_param_i64() {
         let builder = RpcJsonBuilder::new();
-        let rpc_json = builder.add_param_i64(100).build();
+        let rpc_json = builder.add_param_i64("number", 100).build();
         assert_eq!(rpc_json.params.len(), 1);
-        assert_eq!(*rpc_json.params.get(0).unwrap(), 100.to_string());
+        assert_eq!(*rpc_json.params.get("number").unwrap(), 100);
     }
 
     #[test]
     fn test_rpc_json_builder_add_param_i64_str() {
         let builder = RpcJsonBuilder::new();
         let rpc_json = builder
-            .add_param_i64(100)
-            .add_param_string("hello world")
+            .add_param_i64("number", 100)
+            .add_param_string("string", "hello world")
             .build();
 
         assert_eq!(rpc_json.params.len(), 2);
-        assert_eq!(*rpc_json.params.get(0).unwrap(), 100.to_string());
-        assert_eq!(*rpc_json.params.get(1).unwrap(), "hello world");
+        assert_eq!(*rpc_json.params.get("number").unwrap(), 100);
+        assert_eq!(*rpc_json.params.get("string").unwrap(), "hello world");
     }
 }

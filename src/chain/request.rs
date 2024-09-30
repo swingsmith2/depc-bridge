@@ -1,9 +1,11 @@
+use log::debug;
+
 use anyhow::Result;
 use ureq::AgentBuilder;
 
 use super::{Config, RpcJson, RpcResp};
 
-pub fn request(config: &Config, rpc_json: &RpcJson) -> Result<RpcResp> {
+pub fn req(config: &Config, rpc_json: &RpcJson) -> Result<RpcResp> {
     let agent = AgentBuilder::new()
         .try_proxy_from_env(config.use_proxy)
         .build();
@@ -12,6 +14,7 @@ pub fn request(config: &Config, rpc_json: &RpcJson) -> Result<RpcResp> {
     if let Some(auth) = &config.auth {
         req = req.set("Authorization", auth);
     }
+    debug!("sending body:\n{}\n", body);
     let resp = req.send_string(&body)?;
     let resp_str = resp.into_string()?;
     Ok(serde_json::from_str(&resp_str)?)

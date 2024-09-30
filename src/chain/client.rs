@@ -1,8 +1,10 @@
 use std::fs;
 
+use log::error;
+
 use anyhow::Result;
 
-use super::{request, Config, RpcJsonBuilder};
+use super::{req, Block, Config, Error, RpcJsonBuilder};
 
 pub struct Client {
     config: Config,
@@ -11,8 +13,23 @@ pub struct Client {
 impl Client {
     pub fn get_height(&self) -> Result<u64> {
         let rpc_json = RpcJsonBuilder::new().set_method("getblockcount").build();
-        let resp = request(&self.config, &rpc_json)?;
+        let resp = req(&self.config, &rpc_json)?;
         Ok(resp.result.as_u64().unwrap_or_default())
+    }
+
+    pub fn get_block_hash(&self, height: u32) -> Result<String, Error> {
+        let rpc_json = RpcJsonBuilder::new()
+            .set_method("getblockhash")
+            .add_param_i64("height", height as i64)
+            .build();
+        match req(&self.config, &rpc_json) {
+            Ok(resp) => Ok(resp.result.as_str().unwrap().to_owned()),
+            Err(e) => {
+                error!("cannot execute `getblockhash`, reason: {e}");
+                // Err(Error::General)
+                Ok("".to_owned())
+            }
+        }
     }
 }
 
@@ -81,5 +98,17 @@ mod tests {
         let client = builder.set_auth_from_default_cookie(true).build();
         let height = client.get_height().unwrap();
         assert_ne!(height, 0);
+    }
+
+    #[test]
+    fn test_get_block_hash_height_0() {
+        env_logger::init();
+        let builder = ClientBuilder::new();
+        let client = builder.set_auth_from_default_cookie(true).build();
+        let block_hash = client.get_block_hash(0).unwrap();
+        assert_eq!(
+            block_hash,
+            "8cec494f7f02ad25b3abf418f7d5647885000e010c34e16c039711e4061497b0"
+        );
     }
 }
