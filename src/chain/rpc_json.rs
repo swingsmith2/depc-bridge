@@ -27,11 +27,6 @@ impl RpcJsonBuilder {
         }
     }
 
-    pub fn set_id(mut self, id: u32) -> RpcJsonBuilder {
-        self.rpc_json.id = id;
-        self
-    }
-
     pub fn set_method(mut self, method_name: &str) -> RpcJsonBuilder {
         self.rpc_json.method = method_name.to_owned();
         self

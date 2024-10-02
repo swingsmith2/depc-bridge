@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use rusqlite::{params, Connection, Error};
 
 const SQL_CREATE_TABLE_BLOCKS: &str =
@@ -36,52 +38,54 @@ const SQL_UPDATE_DEPC_WITHDRAW: &str =
 const SQL_QUERY_BEST_HEIGHT: &str = "select height from blocks order by height desc limit 1";
 
 pub struct Conn {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
 impl Conn {
     pub fn open_or_create(db_path: &str) -> Result<Conn, Error> {
         let conn = Connection::open(db_path)?;
-        Ok(Conn { conn })
+        Ok(Conn {
+            conn: Mutex::new(conn),
+        })
     }
 
+    #[cfg(test)]
     pub fn open_in_mem() -> Result<Conn, Error> {
         let conn = Connection::open_in_memory()?;
-        Ok(Conn { conn })
+        Ok(Conn {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn init(&self) -> Result<(), Error> {
-        self.conn.execute(SQL_CREATE_TABLE_BLOCKS, [])?;
-        self.conn.execute(SQL_CREATE_UNIQUE_INDEX_BLOCKS_HASH, [])?;
+        let c = self.conn.lock().unwrap();
+        c.execute(SQL_CREATE_TABLE_BLOCKS, [])?;
+        c.execute(SQL_CREATE_UNIQUE_INDEX_BLOCKS_HASH, [])?;
 
-        self.conn.execute(SQL_CREATE_TABLE_TRANSACTIONS, [])?;
-        self.conn
-            .execute(SQL_CREATE_UNIQUE_INDEX_TRANSACTIONS_TXID, [])?;
+        c.execute(SQL_CREATE_TABLE_TRANSACTIONS, [])?;
+        c.execute(SQL_CREATE_UNIQUE_INDEX_TRANSACTIONS_TXID, [])?;
 
-        self.conn.execute(SQL_CREATE_TABLE_COINS, [])?;
-        self.conn
-            .execute(SQL_CREATE_UNIQUE_INDEX_COINS_TXID_N, [])?;
+        c.execute(SQL_CREATE_TABLE_COINS, [])?;
+        c.execute(SQL_CREATE_UNIQUE_INDEX_COINS_TXID_N, [])?;
 
-        self.conn.execute(SQL_CREATE_TABLE_DEPC_DEPOSIT, [])?;
-        self.conn
-            .execute(SQL_CREATE_UNIQUE_INDEX_DEPC_DEPOSIT_DEPC_TXID, [])?;
+        c.execute(SQL_CREATE_TABLE_DEPC_DEPOSIT, [])?;
+        c.execute(SQL_CREATE_UNIQUE_INDEX_DEPC_DEPOSIT_DEPC_TXID, [])?;
 
-        self.conn.execute(SQL_CREATE_TABLE_DEPC_WITHDRAW, [])?;
-        self.conn
-            .execute(SQL_CREATE_UNIQUE_INDEX_DEPC_WITHDRAW_ERC20_TXID, [])?;
+        c.execute(SQL_CREATE_TABLE_DEPC_WITHDRAW, [])?;
+        c.execute(SQL_CREATE_UNIQUE_INDEX_DEPC_WITHDRAW_ERC20_TXID, [])?;
 
         Ok(())
     }
 
     pub fn add_block(&self, hash: &str, height: u32, miner: &str, time: u64) -> Result<(), Error> {
-        self.conn
-            .execute(SQL_INSERT_BLOCK, params![hash, height, miner, time])?;
+        let c = self.conn.lock().unwrap();
+        c.execute(SQL_INSERT_BLOCK, params![hash, height, miner, time])?;
         Ok(())
     }
 
     pub fn add_transaction(&self, block_hash: &str, txid: &str) -> Result<(), Error> {
-        self.conn
-            .execute(SQL_INSERT_TRANSACTION, params![block_hash, txid])?;
+        let c = self.conn.lock().unwrap();
+        c.execute(SQL_INSERT_TRANSACTION, params![block_hash, txid])?;
         Ok(())
     }
 
@@ -93,7 +97,8 @@ impl Conn {
         owner: &str,
         script_hex: &str,
     ) -> Result<(), Error> {
-        self.conn.execute(
+        let c = self.conn.lock().unwrap();
+        c.execute(
             SQL_INSERT_COIN,
             params![txid, n, value, owner, script_hex, false],
         )?;
@@ -107,7 +112,8 @@ impl Conn {
         spent_txid: &str,
         spent_height: u32,
     ) -> Result<(), Error> {
-        self.conn.execute(
+        let c = self.conn.lock().unwrap();
+        c.execute(
             SQL_MARK_COIN_SPENT,
             params![spent_txid, spent_height, txid, n],
         )?;
@@ -122,7 +128,8 @@ impl Conn {
         amount: u64,
         depc_timestamp: u64,
     ) -> Result<(), Error> {
-        self.conn.execute(
+        let c = self.conn.lock().unwrap();
+        c.execute(
             SQL_INSERT_DEPC_DEPOSIT,
             params![
                 depc_txid,
@@ -135,14 +142,14 @@ impl Conn {
         Ok(())
     }
 
-    // "update depc_deposit set erc20_txid = ?, erc20_timestamp = ? where depc_txid = ?";
     pub fn confirm_deposit(
         &self,
         erc20_txid: &str,
         erc20_timestamp: u64,
         depc_txid: &str,
     ) -> Result<(), Error> {
-        self.conn.execute(
+        let c = self.conn.lock().unwrap();
+        c.execute(
             SQL_UPDATE_DEPC_DEPSOIT,
             params![erc20_txid, erc20_timestamp, depc_txid],
         )?;
@@ -157,7 +164,8 @@ impl Conn {
         to_address_depc: &str,
         amount: u64,
     ) -> Result<(), Error> {
-        self.conn.execute(
+        let c = self.conn.lock().unwrap();
+        c.execute(
             SQL_INSERT_DEPC_WITHDRAW,
             params![
                 erc20_txid,
@@ -176,7 +184,8 @@ impl Conn {
         depc_timestamp: u64,
         erc20_txid: &str,
     ) -> Result<(), Error> {
-        self.conn.execute(
+        let c = self.conn.lock().unwrap();
+        c.execute(
             SQL_UPDATE_DEPC_WITHDRAW,
             params![depc_txid, depc_timestamp, erc20_txid],
         )?;
@@ -184,13 +193,11 @@ impl Conn {
     }
 
     pub fn query_best_height(&self) -> Option<u32> {
-        if let Ok(height) =
-            self.conn
-                .query_row(SQL_QUERY_BEST_HEIGHT, [], |row| -> Result<u32, Error> {
-                    let height = row.get(0).unwrap();
-                    Ok(height)
-                })
-        {
+        let c = self.conn.lock().unwrap();
+        if let Ok(height) = c.query_row(SQL_QUERY_BEST_HEIGHT, [], |row| -> Result<u32, Error> {
+            let height = row.get(0).unwrap();
+            Ok(height)
+        }) {
             Some(height)
         } else {
             None

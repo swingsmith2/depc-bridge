@@ -29,7 +29,6 @@ impl Client {
             Ok(resp) => Ok(resp.result.as_str().unwrap().to_owned()),
             Err(e) => {
                 error!("cannot execute `getblockhash`, reason: {e}");
-                // Err(Error::General)
                 Ok("".to_owned())
             }
         }
@@ -100,6 +99,7 @@ impl ClientBuilder {
         self.set_auth(&auth_str)
     }
 
+    #[cfg(test)]
     pub fn set_auth_from_default_cookie(self, testnet3: bool) -> ClientBuilder {
         let cookie_path = if testnet3 {
             shellexpand::env("$HOME/.depinc/testnet3/.cookie").unwrap()

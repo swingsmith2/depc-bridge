@@ -1,15 +1,29 @@
+use std::sync::Arc;
+
 use anyhow::Result;
+use tokio::sync::Mutex;
 
 use crate::chain::Client;
 use crate::db::Conn;
 
-pub fn sync(conn: Conn, client: Client, owner_address: &str) -> Result<()> {
+pub async fn sync(
+    conn: &Conn,
+    client: &Client,
+    owner_address: &str,
+    exit_sig: Arc<Mutex<bool>>,
+) -> Result<()> {
     let mut sync_height = if let Some(height) = conn.query_best_height() {
         height + 1
     } else {
         0
     };
     loop {
+        {
+            let exit = exit_sig.lock().await;
+            if *exit {
+                break;
+            }
+        }
         let chain_height = client.get_height()?;
         if sync_height > chain_height {
             // there is no more block left to sync
@@ -19,11 +33,13 @@ pub fn sync(conn: Conn, client: Client, owner_address: &str) -> Result<()> {
         // block
         let block_hash = client.get_block_hash(sync_height)?;
         let block = client.get_block(&block_hash)?;
+        assert_eq!(block.height, sync_height);
         conn.add_block(&block.hash, sync_height, &block.miner, block.time)?;
 
         // transactions
         for txid in block.tx.iter() {
             let transaction = client.get_transaction(txid)?;
+            assert_eq!(transaction.txid, *txid);
             conn.add_transaction(&block_hash, txid)?;
             for txin in transaction.vin.iter() {
                 if !txin.is_coinbase() {

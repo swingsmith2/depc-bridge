@@ -1,13 +1,19 @@
 use serde::Deserialize;
-use serde_json::{Error, Value};
+use serde_json::Value;
+
+#[cfg(test)]
+use serde_json::Error;
 
 #[derive(Deserialize)]
 pub struct RpcResp {
+    #[cfg(test)]
     pub jsonrpc: Option<String>,
+    #[cfg(test)]
     pub id: u32,
     pub result: Value,
 }
 
+#[cfg(test)]
 pub fn parse_str(s: &str) -> Result<RpcResp, Error> {
     serde_json::from_str(s)
 }
