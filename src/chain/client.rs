@@ -57,7 +57,7 @@ impl Client {
         match req(&self.config, &rpc_json) {
             Ok(resp) => Ok(serde_json::from_value(resp.result).unwrap()),
             Err(e) => {
-                error!("cannot execute `getblock`, reason: {e}");
+                error!("cannot execute `getrawtransaction`, reason: {e}");
                 Err(Error::General)
             }
         }
