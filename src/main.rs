@@ -2,29 +2,30 @@ mod chain;
 mod db;
 mod sync;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use clap::{command, Parser};
-use tokio::{sync::Mutex, time::Duration};
+use log::{debug, info, warn};
+use tokio::time::Duration;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// The endpoint (http://ip:port) for depc node
-    #[arg(long)]
+    #[arg(long, default_value = "http://127.0.0.1:18732")]
     rpc_endpoint: String,
     /// Use cookie for RPC authentication
-    #[arg(long)]
+    #[arg(long, default_value_t = true)]
     rpc_use_cookie: bool,
     /// The path string to file `.cookie`
     #[arg(long, default_value = "$HOME/.depinc/testnet3/.cookie")]
     rpc_cookie_path: String,
     /// The username for RPC authentication
-    #[arg(long)]
+    #[arg(long, default_value = "")]
     rpc_user: String,
     /// The password for RPC authentication
-    #[arg(long)]
+    #[arg(long, default_value = "")]
     rpc_passwd: String,
     /// Use proxy for the connection of RPC
     #[arg(long, default_value_t = false)]
@@ -45,8 +46,9 @@ async fn syncing_routine(
 ) -> Result<()> {
     loop {
         {
-            let exit = exit_sig.lock().await;
+            let exit = exit_sig.lock().unwrap();
             if *exit {
+                info!("exit syncing loop");
                 break;
             }
         }
@@ -59,15 +61,24 @@ async fn syncing_routine(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
+    debug!("debug mode");
+
     let args = Args::parse();
 
     let client = if args.rpc_use_cookie {
+        let cookie_path = shellexpand::env(&args.rpc_cookie_path).unwrap();
+        info!(
+            "prepare client with cookie file {} to {}",
+            cookie_path, args.rpc_endpoint
+        );
         chain::ClientBuilder::new()
-            .set_auth_from_cookie(&args.rpc_cookie_path)
+            .set_auth_from_cookie(&cookie_path)
             .set_use_proxy(args.rpc_use_proxy)
             .set_endpoint(&args.rpc_endpoint)
             .build()
     } else {
+        info!("prepare client with user/passwd to {}", args.rpc_endpoint);
         let auth_str = format!("{}:{}", &args.rpc_user, &args.rpc_passwd);
         chain::ClientBuilder::new()
             .set_auth(&auth_str)
@@ -79,8 +90,27 @@ async fn main() -> Result<()> {
     let db_path = shellexpand::env(&args.local_db).unwrap();
     let conn = db::Conn::open_or_create(&db_path).unwrap();
     conn.init()?;
+    info!("connected to local database, path {}", db_path);
 
     let exit_sig = Arc::new(Mutex::new(false));
 
-    tokio::spawn(syncing_routine(conn, client, args.owner_address, exit_sig)).await?
+    let syncing_handler = tokio::spawn(syncing_routine(
+        conn,
+        client,
+        args.owner_address,
+        Arc::clone(&exit_sig),
+    ));
+
+    // setup ctrl-c handler
+    ctrlc::set_handler(move || {
+        warn!("received ctrl-c, preparing to exit...");
+        let mut exit = exit_sig.lock().unwrap();
+        *exit = true;
+    })
+    .unwrap();
+
+    syncing_handler.await.unwrap().unwrap();
+
+    info!("exit.");
+    Ok(())
 }

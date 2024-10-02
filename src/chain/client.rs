@@ -144,6 +144,19 @@ mod tests {
     }
 
     #[test]
+    fn test_get_block_height_0() {
+        let builder = ClientBuilder::new();
+        let client = builder.set_auth_from_default_cookie(true).build();
+        let block = client
+            .get_block("8cec494f7f02ad25b3abf418f7d5647885000e010c34e16c039711e4061497b0")
+            .unwrap();
+        assert_eq!(
+            block.hash,
+            "8cec494f7f02ad25b3abf418f7d5647885000e010c34e16c039711e4061497b0"
+        );
+    }
+
+    #[test]
     fn test_get_block_10000() {
         let builder = ClientBuilder::new();
         let client = builder.set_auth_from_default_cookie(true).build();

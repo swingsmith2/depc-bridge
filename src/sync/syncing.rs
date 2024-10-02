@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use tokio::sync::Mutex;
+use log::info;
 
 use crate::chain::Client;
 use crate::db::Conn;
@@ -19,7 +19,7 @@ pub async fn sync(
     };
     loop {
         {
-            let exit = exit_sig.lock().await;
+            let exit = exit_sig.lock().unwrap();
             if *exit {
                 break;
             }
@@ -29,6 +29,10 @@ pub async fn sync(
             // there is no more block left to sync
             break;
         }
+        info!(
+            "syncing from height {sync_height} to chain height {chain_height}, distance {}",
+            chain_height - sync_height + 1
+        );
 
         // block
         let block_hash = client.get_block_hash(sync_height)?;

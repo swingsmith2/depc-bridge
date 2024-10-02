@@ -11,7 +11,7 @@ const SQL_INSERT_BLOCK: &str = "insert into blocks (hash, height, miner, time) v
 const SQL_CREATE_TABLE_TRANSACTIONS: &str =
     "create table if not exists transactions (block_hash, txid)";
 const SQL_CREATE_UNIQUE_INDEX_TRANSACTIONS_TXID: &str =
-    "create unique index index__transactions_txid on transactions (txid)";
+    "create unique index if not exists index__transactions_txid on transactions (txid)";
 const SQL_INSERT_TRANSACTION: &str = "insert into transactions (block_hash, txid) values (?, ?)";
 
 const SQL_CREATE_TABLE_COINS: &str =
