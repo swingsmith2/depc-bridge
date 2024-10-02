@@ -17,6 +17,8 @@ pub async fn sync(
     } else {
         0
     };
+    conn.begin_transaction()?;
+
     loop {
         {
             let exit = exit_sig.lock().unwrap();
@@ -75,6 +77,7 @@ pub async fn sync(
         }
         sync_height += 1;
     }
+    conn.commit_transaction()?;
 
     Ok(())
 }

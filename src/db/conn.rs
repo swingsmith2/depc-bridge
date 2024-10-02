@@ -2,6 +2,12 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection, Error};
 
+const SQL_BEGIN_TRANSACTION: &str = "begin transaction";
+
+const SQL_ROLLBACK_TRANSACTION: &str = "rollback transaction";
+
+const SQL_COMMIT_TRANSACTION: &str = "commit transaction";
+
 const SQL_CREATE_TABLE_BLOCKS: &str =
     "create table if not exists blocks (hash, height, miner, time)";
 const SQL_CREATE_UNIQUE_INDEX_BLOCKS_HASH: &str =
@@ -74,6 +80,24 @@ impl Conn {
         c.execute(SQL_CREATE_TABLE_DEPC_WITHDRAW, [])?;
         c.execute(SQL_CREATE_UNIQUE_INDEX_DEPC_WITHDRAW_ERC20_TXID, [])?;
 
+        Ok(())
+    }
+
+    pub fn begin_transaction(&self) -> Result<(), Error> {
+        let c = self.conn.lock().unwrap();
+        c.execute(SQL_BEGIN_TRANSACTION, [])?;
+        Ok(())
+    }
+
+    pub fn rollback_transaction(&self) -> Result<(), Error> {
+        let c = self.conn.lock().unwrap();
+        c.execute(SQL_ROLLBACK_TRANSACTION, [])?;
+        Ok(())
+    }
+
+    pub fn commit_transaction(&self) -> Result<(), Error> {
+        let c = self.conn.lock().unwrap();
+        c.execute(SQL_COMMIT_TRANSACTION, [])?;
         Ok(())
     }
 
