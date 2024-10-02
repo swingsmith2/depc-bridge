@@ -13,12 +13,13 @@ const SQL_CREATE_UNIQUE_INDEX_TRANSACTIONS_TXID: &str =
 const SQL_INSERT_TRANSACTION: &str = "insert into transactions (block_hash, txid) values (?, ?)";
 
 const SQL_CREATE_TABLE_COINS: &str =
-    "create table if not exists coins (txid, n, value, owner, is_spent)";
+    "create table if not exists coins (txid, n, value, owner, script_hex, is_spent, spent_height, spent_txid)";
 const SQL_CREATE_UNIQUE_INDEX_COINS_TXID_N: &str =
     "create unique index if not exists index__coins_txid_n on coins (txid, n)";
 const SQL_INSERT_COIN: &str =
-    "insert into coins (txid, n, value, owner, is_spent) values (?, ?, ?, ?, ?)";
-const SQL_MARK_COIN_SPENT: &str = "update coins set is_spent = true where txid = ? and n = ?";
+    "insert into coins (txid, n, value, owner, script_hex, is_spent) values (?, ?, ?, ?, ?, ?)";
+const SQL_MARK_COIN_SPENT: &str =
+    "update coins set is_spent = true, spent_txid = ?, spent_height = ? where txid = ? and n = ?";
 
 const SQL_CREATE_TABLE_DEPC_DEPOSIT: &str = "create table if not exists depc_deposit (depc_txid, depc_timestamp, from_address_depc, to_address_erc20, amount, erc20_txid, erc20_timestamp)";
 const SQL_CREATE_UNIQUE_INDEX_DEPC_DEPOSIT_DEPC_TXID: &str =
@@ -32,6 +33,7 @@ const SQL_CREATE_UNIQUE_INDEX_DEPC_WITHDRAW_ERC20_TXID: &str = "create unique in
 const SQL_INSERT_DEPC_WITHDRAW: &str = "insert into depc_withdraw (erc20_txid, erc20_timestamp, from_address_erc20, to_address_depc, amount) values (?, ?, ?, ?, ?)";
 const SQL_UPDATE_DEPC_WITHDRAW: &str =
     "update depc_withdraw set depc_txid = ?, depc_timestamp = ? where erc20_txid = ?";
+const SQL_QUERY_BEST_HEIGHT: &str = "select height from blocks order by height desc limit 1";
 
 pub struct Conn {
     conn: Connection,
@@ -83,14 +85,32 @@ impl Conn {
         Ok(())
     }
 
-    pub fn add_coin(&self, txid: &str, n: u32, value: u64, owner: &str) -> Result<(), Error> {
-        self.conn
-            .execute(SQL_INSERT_COIN, params![txid, n, value, owner, false])?;
+    pub fn add_coin(
+        &self,
+        txid: &str,
+        n: u32,
+        value: u64,
+        owner: &str,
+        script_hex: &str,
+    ) -> Result<(), Error> {
+        self.conn.execute(
+            SQL_INSERT_COIN,
+            params![txid, n, value, owner, script_hex, false],
+        )?;
         Ok(())
     }
 
-    pub fn mark_coin_to_spent(&self, txid: &str, n: u32) -> Result<(), Error> {
-        self.conn.execute(SQL_MARK_COIN_SPENT, params![txid, n])?;
+    pub fn mark_coin_to_spent(
+        &self,
+        txid: &str,
+        n: u32,
+        spent_txid: &str,
+        spent_height: u32,
+    ) -> Result<(), Error> {
+        self.conn.execute(
+            SQL_MARK_COIN_SPENT,
+            params![spent_txid, spent_height, txid, n],
+        )?;
         Ok(())
     }
 
@@ -162,6 +182,20 @@ impl Conn {
         )?;
         Ok(())
     }
+
+    pub fn query_best_height(&self) -> Option<u32> {
+        if let Ok(height) =
+            self.conn
+                .query_row(SQL_QUERY_BEST_HEIGHT, [], |row| -> Result<u32, Error> {
+                    let height = row.get(0).unwrap();
+                    Ok(height)
+                })
+        {
+            Some(height)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -201,8 +235,10 @@ mod tests {
         let conn = Conn::open_in_mem().unwrap();
         conn.init().unwrap();
 
-        conn.add_coin("txid", 0, 1000, "helloaddress").unwrap();
-        conn.mark_coin_to_spent("txid", 0).unwrap();
+        conn.add_coin("txid", 0, 1000, "helloaddress", "39204848b93948")
+            .unwrap();
+        conn.mark_coin_to_spent("txid", 0, "spent_txid", 10203)
+            .unwrap();
     }
 
     #[test]

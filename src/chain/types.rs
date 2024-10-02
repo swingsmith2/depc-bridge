@@ -37,6 +37,12 @@ pub struct In {
     pub sequence: u64,
 }
 
+impl In {
+    pub fn is_coinbase(&self) -> bool {
+        self.coinbase.is_some()
+    }
+}
+
 #[derive(Deserialize)]
 pub struct Out {
     pub value64: u64,
@@ -44,6 +50,17 @@ pub struct Out {
     pub n: u32,
     #[serde(rename = "scriptPubKey")]
     pub script_pubkey: ScriptPubKey,
+}
+
+impl Out {
+    pub fn get_address(&self) -> Option<String> {
+        if let Some(addrs) = &self.script_pubkey.addresses {
+            if let Some(addr) = addrs.get(0) {
+                return Some(addr.clone());
+            }
+        }
+        None
+    }
 }
 
 #[derive(Deserialize)]

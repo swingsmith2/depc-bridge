@@ -9,10 +9,10 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn get_height(&self) -> Result<u64, Error> {
+    pub fn get_height(&self) -> Result<u32, Error> {
         let rpc_json = RpcJsonBuilder::new().set_method("getblockcount").build();
         match req(&self.config, &rpc_json) {
-            Ok(resp) => Ok(resp.result.as_u64().unwrap()),
+            Ok(resp) => Ok(resp.result.as_u64().unwrap() as u32),
             Err(e) => {
                 error!("cannot execute `getheight`, reason: {e}");
                 Err(Error::General)
