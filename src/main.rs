@@ -5,13 +5,17 @@ mod sync;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use axum::{routing::get, Router};
 use clap::{command, Parser};
 use log::{debug, info, warn};
-use tokio::time::Duration;
+use tokio::{signal, time::Duration};
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// The address:port the web service will listen to
+    #[arg(long, default_value = "127.0.0.1:3000")]
+    bind: String,
     /// The endpoint (http://ip:port) for depc node
     #[arg(long, default_value = "http://127.0.0.1:18732")]
     rpc_endpoint: String,
@@ -48,7 +52,7 @@ async fn syncing_routine(
         {
             let exit = exit_sig.lock().unwrap();
             if *exit {
-                info!("exit syncing loop");
+                info!("syncing loop exits.");
                 break;
             }
         }
@@ -57,6 +61,40 @@ async fn syncing_routine(
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     Ok(())
+}
+
+async fn get_root() -> &'static str {
+    "hello world"
+}
+
+async fn shutdown_signal(exit: Arc<Mutex<bool>>) {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+        warn!("ctrl-c is received, sending exit signal");
+
+        {
+            let mut e = exit.lock().unwrap();
+            *e = true;
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }
 
 #[tokio::main]
@@ -101,14 +139,17 @@ async fn main() -> Result<()> {
         Arc::clone(&exit_sig),
     ));
 
-    // setup ctrl-c handler
-    ctrlc::set_handler(move || {
-        warn!("received ctrl-c, preparing to exit...");
-        let mut exit = exit_sig.lock().unwrap();
-        *exit = true;
-    })
-    .unwrap();
+    info!("listening on {}", args.bind);
+    let app = Router::new().route("/", get(get_root));
+    let listener = tokio::net::TcpListener::bind(args.bind).await.unwrap();
 
+    info!("web server is running...");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(exit_sig))
+        .await
+        .unwrap();
+
+    info!("web server exits.");
     syncing_handler.await.unwrap().unwrap();
 
     info!("exit.");
