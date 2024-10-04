@@ -171,7 +171,8 @@ async fn get_exchange_addresses(
     const MIN_HEIGHT: u32 = 860130u32;
     let mut now = Utc::now();
     let mut resp = HashMap::new();
-    let mut curr_height = state.conn.query_best_height().unwrap_or_default();
+    let chain_height = state.conn.query_best_height().unwrap_or_default();
+    let mut curr_height = MIN_HEIGHT;
     'outer: loop {
         info!("checking balance for date {}...", now.to_rfc3339());
         let mut balance_by_date = RespExchangeBalanceByDate {
@@ -205,8 +206,8 @@ async fn get_exchange_addresses(
         resp.insert(now.to_rfc3339(), balance_by_date);
         // next
         now = now.checked_sub_days(Days::new(30)).unwrap();
-        curr_height -= HEIGHTS_WEEK * 4;
-        if curr_height < MIN_HEIGHT {
+        curr_height += HEIGHTS_WEEK * 4;
+        if curr_height > chain_height {
             break;
         }
     }
