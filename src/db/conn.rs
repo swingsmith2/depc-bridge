@@ -243,6 +243,37 @@ impl Conn {
             None
         }
     }
+
+    pub fn query_balance(&self, address: &str) -> Result<u64, Error> {
+        let c = self.conn.lock().unwrap();
+        Ok(
+            c.query_row(SQL_QUERY_BALANCE_OF_ADDRESS, params![address], |row| {
+                row.get(0)
+            })?,
+        )
+    }
+
+    pub fn query_inputs(&self, txid: &str) -> Result<Vec<String>, Error> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = c.prepare(SQL_QUERY_ADDRESSES_FROM_TX_INPUTS)?;
+        let iter = stmt.query_map(params![txid], |rec| -> Result<String, Error> {
+            let address: String = rec.get(0)?;
+            Ok(address)
+        })?;
+        iter.collect()
+    }
+
+    pub fn query_txids_those_inputs_contain_address(
+        &self,
+        address: &str,
+    ) -> Result<Vec<String>, Error> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = c.prepare(SQL_QUERY_TXIDS_THOSE_INPUTS_CONTAIN_ADDRESS)?;
+        let iter = stmt.query_map(params![address], |rec| -> Result<String, Error> {
+            Ok(rec.get(0).unwrap())
+        })?;
+        iter.collect()
+    }
 }
 
 #[cfg(test)]
