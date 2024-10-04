@@ -56,7 +56,9 @@ const SQL_QUERY_TXIDS_THOSE_INPUTS_CONTAIN_ADDRESS: &str =
     "select spent_txid from coins where owner = ? and is_spent = true group by spent_txid";
 
 const SQL_QUERY_BALANCE_OF_ADDRESS: &str =
-    "select sum(value) from coins where owner = ? and (spent_height is null or spent_height > ?)";
+    "select sum(value) from coins left join transactions on transactions.txid = coins.txid left join blocks on blocks.hash = transactions.block_hash where owner = ? and height <= ? and (spent_height is null or spent_height > ?)";
+
+const SQL_QUERY_BLOCK_TIME_BY_HEIGHT: &str = "select time from blocks where height = ?";
 
 #[derive(Clone)]
 pub struct Conn {
@@ -251,7 +253,7 @@ impl Conn {
         let c = self.conn.lock().unwrap();
         Ok(c.query_row(
             SQL_QUERY_BALANCE_OF_ADDRESS,
-            params![address, height],
+            params![address, height, height],
             |row| row.get(0),
         )?)
     }
