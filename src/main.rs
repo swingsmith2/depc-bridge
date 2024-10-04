@@ -2,12 +2,22 @@ mod chain;
 mod db;
 mod sync;
 
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Result;
-use axum::{routing::get, Router};
+use axum::{
+    extract::{Path, State},
+    routing::get,
+    Json, Router,
+};
 use clap::{command, Parser};
 use log::{debug, info, warn};
+use num_format::Locale;
+use num_format::ToFormattedString;
+use serde_json::Value;
 use tokio::{signal, time::Duration};
 
 #[derive(Debug, Parser)]
@@ -63,8 +73,120 @@ async fn syncing_routine(
     Ok(())
 }
 
+struct ServerData {
+    conn: db::Conn,
+    exit: Arc<Mutex<bool>>,
+}
+
+#[axum::debug_handler]
 async fn get_root() -> &'static str {
     "hello world"
+}
+
+#[derive(serde::Serialize)]
+struct RespExchangeAddresses {
+    balance: u64,
+    balance_human: String,
+    addresses: HashMap<String, String>,
+}
+
+trait FormatMoney {
+    fn format_money(&self) -> String;
+}
+
+impl FormatMoney for u64 {
+    fn format_money(&self) -> String {
+        const COIN: u64 = 100000000;
+        (self / COIN).to_formatted_string(&Locale::en)
+    }
+}
+
+#[axum::debug_handler]
+async fn get_exchange_addresses(
+    Path(txid): Path<String>,
+    State(state): State<Arc<ServerData>>,
+) -> Json<Value> {
+    let mut final_addresses = vec![];
+    let addresses = state.conn.query_inputs(&txid).unwrap();
+    final_addresses.extend(addresses.clone());
+    info!(
+        "queried total {} address(es) which are related to txid {}",
+        final_addresses.len(),
+        txid
+    );
+    let mut final_txids = Vec::new();
+    for address in addresses.iter() {
+        tokio::time::sleep(tokio::time::Duration::from_millis(3)).await;
+        {
+            let exit = state.exit.lock().unwrap();
+            if *exit {
+                break;
+            }
+        }
+        info!("querying txids which are related to address {}", address);
+        let txids = state
+            .conn
+            .query_txids_those_inputs_contain_address(address)
+            .unwrap();
+        info!(
+            "queried total {} txid(s) which are related to address {}",
+            txids.len(),
+            address
+        );
+        final_txids.extend(txids);
+    }
+    final_txids.sort();
+    final_txids.dedup();
+    info!(
+        "analyzing total {} txids to get exchange addresses",
+        final_txids.len()
+    );
+    for txid in final_txids.iter() {
+        tokio::time::sleep(tokio::time::Duration::from_millis(3)).await;
+        {
+            let exit = state.exit.lock().unwrap();
+            if *exit {
+                break;
+            }
+        }
+        let mut sub_addresses = state.conn.query_inputs(txid).unwrap();
+        let sub_total = sub_addresses.len();
+        final_addresses.append(&mut sub_addresses);
+        info!(
+            "found {} address(es) related to txid {}, total {}",
+            sub_total,
+            txid,
+            final_addresses.len(),
+        );
+    }
+    info!("result is ready, now converting the result into json...");
+    // query balances for each addresses
+    let mut resp = RespExchangeAddresses {
+        balance: 0,
+        balance_human: 0u64.format_money(),
+        addresses: HashMap::new(),
+    };
+    final_addresses.sort();
+    final_addresses.dedup();
+    for address in final_addresses.iter() {
+        tokio::time::sleep(tokio::time::Duration::from_millis(3)).await;
+        {
+            let exit = state.exit.lock().unwrap();
+            if *exit {
+                break;
+            }
+        }
+        let curr_balance = state.conn.query_balance(address).unwrap_or_default();
+        if curr_balance > 0 {
+            resp.balance += curr_balance;
+            resp.addresses
+                .insert(address.clone(), curr_balance.format_money());
+        }
+    }
+    resp.balance_human = resp.balance.format_money();
+    info!("done.");
+
+    Json(serde_json::to_value(resp).unwrap())
 }
 
 async fn shutdown_signal(exit: Arc<Mutex<bool>>) {
@@ -133,14 +255,20 @@ async fn main() -> Result<()> {
     let exit_sig = Arc::new(Mutex::new(false));
 
     let syncing_handler = tokio::spawn(syncing_routine(
-        conn,
+        conn.clone(),
         client,
         args.owner_address,
         Arc::clone(&exit_sig),
     ));
 
     info!("listening on {}", args.bind);
-    let app = Router::new().route("/", get(get_root));
+    let app = Router::new()
+        .route("/", get(get_root))
+        .route("/exchange/:txid", get(get_exchange_addresses))
+        .with_state(Arc::new(ServerData {
+            conn,
+            exit: Arc::clone(&exit_sig),
+        }));
     let listener = tokio::net::TcpListener::bind(args.bind).await.unwrap();
 
     info!("web server is running...");

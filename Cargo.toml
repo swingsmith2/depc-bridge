@@ -5,10 +5,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.89"
-axum = "0.7.7"
+axum = { version = "0.7.7", features = ["macros"] }
 clap = { version = "4.5.18", features = ["derive"] }
 env_logger = "0.11.5"
 log = "0.4.22"
+num-format = "0.4.4"
 rbase64 = "2.0.3"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.210", features = ["derive"] }
