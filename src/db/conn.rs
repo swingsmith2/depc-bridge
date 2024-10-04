@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, Error};
 
@@ -43,15 +43,25 @@ const SQL_UPDATE_DEPC_WITHDRAW: &str =
     "update depc_withdraw set depc_txid = ?, depc_timestamp = ? where erc20_txid = ?";
 const SQL_QUERY_BEST_HEIGHT: &str = "select height from blocks order by height desc limit 1";
 
+const SQL_QUERY_ADDRESSES_FROM_TX_INPUTS: &str =
+    "select owner from coins where spent_txid = ? and is_spent = true";
+
+const SQL_QUERY_TXIDS_THOSE_INPUTS_CONTAIN_ADDRESS: &str =
+    "select spent_txid from coins where owner = ? and is_spent = true group by spent_txid";
+
+const SQL_QUERY_BALANCE_OF_ADDRESS: &str =
+    "select sum(value) from coins where is_spent = false and owner = ?";
+
+#[derive(Clone)]
 pub struct Conn {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl Conn {
     pub fn open_or_create(db_path: &str) -> Result<Conn, Error> {
         let conn = Connection::open(db_path)?;
         Ok(Conn {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
         })
     }
 
@@ -59,7 +69,7 @@ impl Conn {
     pub fn open_in_mem() -> Result<Conn, Error> {
         let conn = Connection::open_in_memory()?;
         Ok(Conn {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
         })
     }
 
