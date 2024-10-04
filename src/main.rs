@@ -111,7 +111,7 @@ async fn get_exchange_addresses(
     let addresses = state.conn.query_inputs(&txid).unwrap();
     final_addresses.extend(addresses.clone());
     info!(
-        "queried total {} address(es) which are related to txid {}",
+        "queried total {} address(es) from txid {}",
         final_addresses.len(),
         txid
     );
@@ -154,7 +154,7 @@ async fn get_exchange_addresses(
         let sub_total = sub_addresses.len();
         final_addresses.append(&mut sub_addresses);
         info!(
-            "found {} address(es) related to txid {}, total {}",
+            "found {} address(es) from txid {}, total {}",
             sub_total,
             txid,
             final_addresses.len(),
