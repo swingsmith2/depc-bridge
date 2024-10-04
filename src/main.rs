@@ -13,7 +13,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use chrono::{Days, Utc};
+use chrono::DateTime;
 use clap::{command, Parser};
 use log::{debug, info, warn};
 use num_format::Locale;
@@ -169,11 +169,12 @@ async fn get_exchange_addresses(
     const HEIGHTS_DAY: u32 = 60 / 3 * 24;
     const HEIGHTS_WEEK: u32 = HEIGHTS_DAY * 7;
     const MIN_HEIGHT: u32 = 860130u32;
-    let mut now = Utc::now();
     let mut resp = HashMap::new();
     let chain_height = state.conn.query_best_height().unwrap_or_default();
     let mut curr_height = MIN_HEIGHT;
     'outer: loop {
+        let block_timestamp = state.conn.query_block_time_by_height(curr_height);
+        let now = DateTime::from_timestamp(block_timestamp as i64, 0).unwrap();
         info!("checking balance for date {}...", now.to_rfc3339());
         let mut balance_by_date = RespExchangeBalanceByDate {
             balance: 0,
@@ -205,7 +206,6 @@ async fn get_exchange_addresses(
         // save to resp
         resp.insert(now.to_rfc3339(), balance_by_date);
         // next
-        now = now.checked_sub_days(Days::new(30)).unwrap();
         curr_height += HEIGHTS_WEEK * 4;
         if curr_height > chain_height {
             break;

@@ -249,6 +249,14 @@ impl Conn {
         }
     }
 
+    pub fn query_block_time_by_height(&self, height: u32) -> u64 {
+        let c = self.conn.lock().unwrap();
+        c.query_row(SQL_QUERY_BLOCK_TIME_BY_HEIGHT, params![height], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    }
+
     pub fn query_balance(&self, address: &str, height: u32) -> Result<u64, Error> {
         let c = self.conn.lock().unwrap();
         Ok(c.query_row(
