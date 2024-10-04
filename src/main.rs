@@ -13,6 +13,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use chrono::{Days, Utc};
 use clap::{command, Parser};
 use log::{debug, info, warn};
 use num_format::Locale;
@@ -84,7 +85,7 @@ async fn get_root() -> &'static str {
 }
 
 #[derive(serde::Serialize)]
-struct RespExchangeAddresses {
+struct RespExchangeBalanceByDate {
     balance: u64,
     balance_human: String,
     addresses: HashMap<String, String>,
@@ -161,29 +162,54 @@ async fn get_exchange_addresses(
     }
     info!("result is ready, now converting the result into json...");
     // query balances for each addresses
-    let mut resp = RespExchangeAddresses {
-        balance: 0,
-        balance_human: 0u64.format_money(),
-        addresses: HashMap::new(),
-    };
     final_addresses.sort();
     final_addresses.dedup();
-    for address in final_addresses.iter() {
-        tokio::time::sleep(tokio::time::Duration::from_millis(3)).await;
-        {
-            let exit = state.exit.lock().unwrap();
-            if *exit {
-                break;
+    info!("total {} address(es)", final_addresses.len());
+    // query balances with different period
+    const HEIGHTS_DAY: u32 = 60 / 3 * 24;
+    const HEIGHTS_WEEK: u32 = HEIGHTS_DAY * 7;
+    const MIN_HEIGHT: u32 = 860130u32;
+    let mut now = Utc::now();
+    let mut resp = HashMap::new();
+    let mut curr_height = state.conn.query_best_height().unwrap_or_default();
+    'outer: loop {
+        info!("checking balance for date {}...", now.to_rfc3339());
+        let mut balance_by_date = RespExchangeBalanceByDate {
+            balance: 0,
+            balance_human: 0u64.format_money(),
+            addresses: HashMap::new(),
+        };
+        for address in final_addresses.iter() {
+            tokio::time::sleep(tokio::time::Duration::from_millis(3)).await;
+            {
+                let exit = state.exit.lock().unwrap();
+                if *exit {
+                    break 'outer;
+                }
+            }
+            let curr_balance = state
+                .conn
+                .query_balance(address, curr_height)
+                .unwrap_or_default();
+            if curr_balance > 0 {
+                balance_by_date.balance += curr_balance;
+                balance_by_date
+                    .addresses
+                    .insert(address.clone(), curr_balance.format_money());
             }
         }
-        let curr_balance = state.conn.query_balance(address).unwrap_or_default();
-        if curr_balance > 0 {
-            resp.balance += curr_balance;
-            resp.addresses
-                .insert(address.clone(), curr_balance.format_money());
+        balance_by_date.balance_human = balance_by_date.balance.format_money();
+        info!("checked, balance = {}", balance_by_date.balance_human);
+
+        // save to resp
+        resp.insert(now.to_rfc3339(), balance_by_date);
+        // next
+        now = now.checked_sub_days(Days::new(30)).unwrap();
+        curr_height -= HEIGHTS_WEEK * 4;
+        if curr_height < MIN_HEIGHT {
+            break;
         }
     }
-    resp.balance_human = resp.balance.format_money();
     info!("done.");
 
     Json(serde_json::to_value(resp).unwrap())
