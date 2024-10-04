@@ -33,7 +33,7 @@ pub async fn sync(
         }
         info!(
             "syncing from height {sync_height} to chain height {chain_height}, distance {}",
-            chain_height - sync_height + 1
+            chain_height - sync_height
         );
 
         // block
