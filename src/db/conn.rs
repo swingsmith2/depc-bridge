@@ -28,6 +28,8 @@ const SQL_CREATE_INDEX_COINS_SPENT_TXID: &str =
     "create index if not exists index__coins_spent_txid on coins (spent_txid)";
 const SQL_CREATE_INDEX_COINS_OWNER: &str =
     "create index if not exists index__coins_owner on coins (owner)";
+const SQL_CREATE_INDEX_COINS_SPENT_HEIGHT: &str =
+    "create index if not exists index__coins_spent_height on coins (spent_height)";
 const SQL_INSERT_COIN: &str =
     "insert into coins (txid, n, value, owner, script_hex, is_spent) values (?, ?, ?, ?, ?, ?)";
 const SQL_MARK_COIN_SPENT: &str =
@@ -89,6 +91,7 @@ impl Conn {
         c.execute(SQL_CREATE_UNIQUE_INDEX_COINS_TXID_N, [])?;
         c.execute(SQL_CREATE_INDEX_COINS_SPENT_TXID, [])?;
         c.execute(SQL_CREATE_INDEX_COINS_OWNER, [])?;
+        c.execute(SQL_CREATE_INDEX_COINS_SPENT_HEIGHT, [])?;
 
         c.execute(SQL_CREATE_TABLE_DEPC_DEPOSIT, [])?;
         c.execute(SQL_CREATE_UNIQUE_INDEX_DEPC_DEPOSIT_DEPC_TXID, [])?;
