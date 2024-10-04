@@ -56,7 +56,7 @@ const SQL_QUERY_TXIDS_THOSE_INPUTS_CONTAIN_ADDRESS: &str =
     "select spent_txid from coins where owner = ? and is_spent = true group by spent_txid";
 
 const SQL_QUERY_BALANCE_OF_ADDRESS: &str =
-    "select sum(value) from coins where is_spent = false and owner = ?";
+    "select sum(value) from coins where owner = ? and (spent_height is null or spent_height > ?)";
 
 #[derive(Clone)]
 pub struct Conn {
@@ -247,13 +247,13 @@ impl Conn {
         }
     }
 
-    pub fn query_balance(&self, address: &str) -> Result<u64, Error> {
+    pub fn query_balance(&self, address: &str, height: u32) -> Result<u64, Error> {
         let c = self.conn.lock().unwrap();
-        Ok(
-            c.query_row(SQL_QUERY_BALANCE_OF_ADDRESS, params![address], |row| {
-                row.get(0)
-            })?,
-        )
+        Ok(c.query_row(
+            SQL_QUERY_BALANCE_OF_ADDRESS,
+            params![address, height],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn query_inputs(&self, txid: &str) -> Result<Vec<String>, Error> {
