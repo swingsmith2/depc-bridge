@@ -279,8 +279,8 @@ impl Conn {
     pub fn query_inputs(&self, txid: &str) -> Result<Vec<String>, Error> {
         let c = self.conn.lock().unwrap();
         let mut stmt = c.prepare(SQL_QUERY_ADDRESSES_FROM_TX_INPUTS)?;
-        let iter = stmt.query_map(params![txid], |rec| -> Result<String, Error> {
-            let address: String = rec.get(0)?;
+        let iter = stmt.query_map(params![txid], |row| {
+            let address: String = row.get(0)?;
             Ok(address)
         })?;
         iter.collect()
