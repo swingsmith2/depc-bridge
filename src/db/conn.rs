@@ -60,6 +60,13 @@ const SQL_QUERY_BALANCE_OF_ADDRESS: &str =
 
 const SQL_QUERY_BLOCK_TIME_BY_HEIGHT: &str = "select time from blocks where height = ?";
 
+const SQL_CREATE_TABLE_EXCHANGE_ADDRESSES: &str = "create table if not exists exchange_addresses (address text primary key not null, analyzed_txid text not null)";
+const SQL_CREATE_INDEX_EXCHANGE_ADDRESSES_ANALYZED_TXID: &str = "create index if not exists index__exchange_addresses_analyzed_txid on exchange_addresses (analyzed_txid)";
+const SQL_INSERT_EXCHANGE_ADDRESSE: &str =
+    "insert into exchange_addresses (address, analyzed_txid) values (?, ?)";
+const SQL_QUERY_EXCHANGE_ADDRESSES: &str = "select address from exchange_addresses";
+const SQL_QUERY_NUM_EXCHANGE_ADDRESSES: &str = "select count(*) from exchange_addresses";
+
 #[derive(Clone)]
 pub struct Conn {
     conn: Arc<Mutex<Connection>>,
@@ -100,6 +107,9 @@ impl Conn {
 
         c.execute(SQL_CREATE_TABLE_DEPC_WITHDRAW, [])?;
         c.execute(SQL_CREATE_UNIQUE_INDEX_DEPC_WITHDRAW_ERC20_TXID, [])?;
+
+        c.execute(SQL_CREATE_TABLE_EXCHANGE_ADDRESSES, [])?;
+        c.execute(SQL_CREATE_INDEX_EXCHANGE_ADDRESSES_ANALYZED_TXID, [])?;
 
         Ok(())
     }
@@ -282,10 +292,33 @@ impl Conn {
     ) -> Result<Vec<String>, Error> {
         let c = self.conn.lock().unwrap();
         let mut stmt = c.prepare(SQL_QUERY_TXIDS_THOSE_INPUTS_CONTAIN_ADDRESS)?;
-        let iter = stmt.query_map(params![address], |rec| -> Result<String, Error> {
-            Ok(rec.get(0).unwrap())
+        let iter = stmt.query_map(params![address], |row| Ok(row.get(0).unwrap()))?;
+        iter.collect()
+    }
+
+    pub fn add_analyzed_exchange_address_from_tx(
+        &self,
+        address: &str,
+        txid: &str,
+    ) -> Result<(), Error> {
+        let c = self.conn.lock().unwrap();
+        c.execute(SQL_INSERT_EXCHANGE_ADDRESSE, params![address, txid])?;
+        Ok(())
+    }
+
+    pub fn query_analyzed_exchange_addresses(&self) -> Result<Vec<String>, Error> {
+        let c = self.conn.lock().unwrap();
+        let mut stmt = c.prepare(SQL_QUERY_EXCHANGE_ADDRESSES)?;
+        let iter = stmt.query_map([], |row| {
+            let address: String = row.get(0)?;
+            Ok(address)
         })?;
         iter.collect()
+    }
+
+    pub fn query_num_exchange_addresses(&self) -> Result<u64, Error> {
+        let c = self.conn.lock().unwrap();
+        Ok(c.query_row(SQL_QUERY_NUM_EXCHANGE_ADDRESSES, [], |row| row.get(0))?)
     }
 }
 
