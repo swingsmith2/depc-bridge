@@ -1,6 +1,7 @@
 mod chain;
 mod db;
 mod sync;
+mod bridge;
 
 use std::{
     collections::HashMap,
