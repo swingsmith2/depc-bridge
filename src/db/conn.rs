@@ -39,10 +39,10 @@ const SQL_MARK_COIN_SPENT: &str =
     "update coins set is_spent = true, spent_txid = ?, spent_height = ? where txid = ? and n = ?";
 
 /// Table `deposit`
-const SQL_CREATE_TABLE_DEPC_DEPOSIT: &str = "create table if not exists depc_deposit (depc_txid, depc_timestamp, from_address_depc, to_address_erc20, amount, erc20_txid, erc20_timestamp)";
+const SQL_CREATE_TABLE_DEPC_DEPOSIT: &str = "create table if not exists depc_deposit (depc_txid, depc_timestamp, to_address_erc20, amount, erc20_txid, erc20_timestamp)";
 const SQL_CREATE_UNIQUE_INDEX_DEPC_DEPOSIT_DEPC_TXID: &str =
     "create unique index if not exists index__depc_deposit_depc_txid on depc_deposit (depc_txid)";
-const SQL_INSERT_DEPC_DEPOSIT: &str = "insert into depc_deposit (depc_txid, from_address_depc, to_address_erc20, amount, depc_timestamp) values (?, ?, ?, ?, ?)";
+const SQL_INSERT_DEPC_DEPOSIT: &str = "insert into depc_deposit (depc_txid, to_address_erc20, amount, depc_timestamp) values (?, ?, ?, ?)";
 const SQL_UPDATE_DEPC_DEPSOIT: &str =
     "update depc_deposit set erc20_txid = ?, erc20_timestamp = ? where depc_txid = ?";
 
@@ -181,7 +181,6 @@ impl Conn {
     pub fn make_deposit(
         &self,
         depc_txid: &str,
-        from_address_depc: &str,
         to_address_erc20: &str,
         amount: u64,
         depc_timestamp: u64,
@@ -189,13 +188,7 @@ impl Conn {
         let c = self.conn.lock().unwrap();
         c.execute(
             SQL_INSERT_DEPC_DEPOSIT,
-            params![
-                depc_txid,
-                from_address_depc,
-                to_address_erc20,
-                amount,
-                depc_timestamp
-            ],
+            params![depc_txid, to_address_erc20, amount, depc_timestamp],
         )?;
         Ok(())
     }
