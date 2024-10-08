@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use log::info;
 
+use crate::bridge::extract_string_from_script_hex;
 use crate::chain::Client;
 use crate::db::Conn;
 
@@ -40,13 +41,13 @@ pub async fn sync(
         let block_hash = client.get_block_hash(sync_height)?;
         let block = client.get_block(&block_hash)?;
         assert_eq!(block.height, sync_height);
-
         conn.add_block(&block.hash, sync_height, &block.miner, block.time)?;
 
         if sync_height > 0 {
             // transactions
             for txid in block.tx.iter() {
                 let transaction = client.get_transaction(txid)?;
+                let mut erc20_address = None;
                 assert_eq!(transaction.txid, *txid);
                 conn.add_transaction(&block_hash, txid)?;
                 for txin in transaction.vin.iter() {
@@ -60,6 +61,7 @@ pub async fn sync(
                         )?;
                     }
                 }
+                let mut total = 0u64;
                 for txout in transaction.vout.iter() {
                     // save the txout anyway
                     if let Some(address) = txout.get_address() {
@@ -72,9 +74,26 @@ pub async fn sync(
                         )?;
                         // check the coin is mine?
                         if address == owner_address {
-                            // TODO now check the extra fields to get the ERC20 info.
+                            total += txout.value64;
+                        }
+                    } else {
+                        // maybe it is the script with erc20 address
+                        if let Ok(address) =
+                            extract_string_from_script_hex(&txout.script_pubkey.hex)
+                        {
+                            erc20_address = Some(address);
                         }
                     }
+                }
+                if erc20_address.is_some() && total > 0 {
+                    // extract data from the transaction
+                    conn.make_deposit(
+                        &transaction.txid,
+                        &erc20_address.unwrap(),
+                        total,
+                        block.time,
+                    )?;
+                    // TODO deliver to the consumer for making deposit to erc20
                 }
             }
         }
