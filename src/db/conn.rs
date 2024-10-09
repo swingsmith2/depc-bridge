@@ -366,14 +366,8 @@ mod tests {
         let conn = Conn::open_in_mem().unwrap();
         conn.init().unwrap();
 
-        conn.make_deposit(
-            "depc_txid",
-            "from_address",
-            "to_erc20_address",
-            10000000,
-            394838121,
-        )
-        .unwrap();
+        conn.make_deposit("depc_txid", "to_erc20_address", 10000000, 394838121)
+            .unwrap();
 
         conn.confirm_deposit("erc20_txid", 193847845, "depc_txid")
             .unwrap();
