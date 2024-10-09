@@ -4,7 +4,7 @@ use anyhow::Result;
 use log::info;
 use tokio::sync::mpsc::Sender;
 
-use crate::bridge::Deposit;
+use crate::bridge::deposit::Deposit;
 use crate::db::Conn;
 use crate::depc::{extract_string_from_script_hex, Client};
 

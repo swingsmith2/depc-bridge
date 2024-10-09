@@ -1,11 +1,11 @@
-mod eth;
 mod depc;
+mod eth;
 
 mod db;
 mod rpc;
 
-mod sync;
 mod bridge;
+mod sync;
 
 use std::{
     collections::HashMap,
@@ -30,7 +30,7 @@ use tokio::{
     time::Duration,
 };
 
-use bridge::Deposit;
+use bridge::deposit;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -69,7 +69,7 @@ async fn syncing_routine(
     client: depc::Client,
     owner_address: String,
     exit_sig: Arc<Mutex<bool>>,
-    tx: Sender<Deposit>,
+    tx: Sender<deposit::Deposit>,
 ) -> Result<()> {
     loop {
         {
@@ -345,7 +345,8 @@ async fn main() -> Result<()> {
         tx,
     ));
 
-    // TODO run the consumer
+    // run the consumer to process deposit
+    let consumer_handler = tokio::spawn(deposit::consumer(rx));
 
     info!("listening on {}", args.bind);
     let app = Router::new()

@@ -1,7 +1,9 @@
+mod address;
 mod client;
-mod transaction;
 mod error;
+mod transaction;
 
-pub use transaction::*;
+pub use address::*;
 pub use client::*;
 pub use error::*;
+pub use transaction::*;
