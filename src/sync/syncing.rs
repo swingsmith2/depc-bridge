@@ -2,16 +2,18 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use log::info;
+use tokio::sync::mpsc::Sender;
 
-use crate::bridge::extract_string_from_script_hex;
-use crate::chain::Client;
+use crate::bridge::Deposit;
 use crate::db::Conn;
+use crate::depc::{extract_string_from_script_hex, Client};
 
 pub async fn sync(
     conn: &Conn,
     client: &Client,
     owner_address: &str,
     exit_sig: Arc<Mutex<bool>>,
+    tx: Sender<Deposit>,
 ) -> Result<()> {
     let mut sync_height = if let Some(height) = conn.query_best_height() {
         height + 1
@@ -61,7 +63,7 @@ pub async fn sync(
                         )?;
                     }
                 }
-                let mut total = 0u64;
+                let mut amount = 0u64;
                 for txout in transaction.vout.iter() {
                     // save the txout anyway
                     if let Some(address) = txout.get_address() {
@@ -74,7 +76,7 @@ pub async fn sync(
                         )?;
                         // check the coin is mine?
                         if address == owner_address {
-                            total += txout.value64;
+                            amount += txout.value64;
                         }
                     } else {
                         // maybe it is the script with erc20 address
@@ -85,15 +87,16 @@ pub async fn sync(
                         }
                     }
                 }
-                if erc20_address.is_some() && total > 0 {
+                if erc20_address.is_some() && amount > 0 {
+                    let address = erc20_address.unwrap();
                     // extract data from the transaction
-                    conn.make_deposit(
-                        &transaction.txid,
-                        &erc20_address.unwrap(),
-                        total,
-                        block.time,
-                    )?;
-                    // TODO deliver to the consumer for making deposit to erc20
+                    conn.make_deposit(&transaction.txid, &address, amount, block.time)?;
+                    // deliver to the consumer for making deposit to erc20
+                    let deposit = Deposit {
+                        erc20_address: address,
+                        amount,
+                    };
+                    tx.send(deposit).await?;
                 }
             }
         }

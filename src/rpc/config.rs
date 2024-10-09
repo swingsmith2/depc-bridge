@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct Config {
     pub endpoint: String,
     pub use_proxy: bool,

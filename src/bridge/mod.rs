@@ -1,3 +1,3 @@
-mod depc_script;
+mod deposit;
 
-pub use depc_script::*;
+pub use deposit::*;

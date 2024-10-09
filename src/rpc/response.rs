@@ -5,7 +5,7 @@ use serde_json::Value;
 use serde_json::Error;
 
 #[derive(Deserialize)]
-pub struct RpcResp {
+pub struct Response {
     #[cfg(test)]
     pub jsonrpc: Option<String>,
     #[cfg(test)]
@@ -14,7 +14,7 @@ pub struct RpcResp {
 }
 
 #[cfg(test)]
-pub fn parse_str(s: &str) -> Result<RpcResp, Error> {
+pub fn parse_str(s: &str) -> Result<Response, Error> {
     serde_json::from_str(s)
 }
 

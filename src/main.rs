@@ -1,5 +1,9 @@
-mod chain;
+mod eth;
+mod depc;
+
 mod db;
+mod rpc;
+
 mod sync;
 mod bridge;
 
@@ -20,7 +24,13 @@ use log::{debug, error, info, warn};
 use num_format::Locale;
 use num_format::ToFormattedString;
 use serde_json::Value;
-use tokio::{signal, time::Duration};
+use tokio::{
+    signal,
+    sync::mpsc::{channel, Receiver, Sender},
+    time::Duration,
+};
+
+use bridge::Deposit;
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -56,9 +66,10 @@ struct Args {
 
 async fn syncing_routine(
     conn: db::Conn,
-    client: chain::Client,
+    client: depc::Client,
     owner_address: String,
     exit_sig: Arc<Mutex<bool>>,
+    tx: Sender<Deposit>,
 ) -> Result<()> {
     loop {
         {
@@ -68,7 +79,14 @@ async fn syncing_routine(
                 break;
             }
         }
-        sync::sync(&conn, &client, &owner_address, Arc::clone(&exit_sig)).await?;
+        sync::sync(
+            &conn,
+            &client,
+            &owner_address,
+            Arc::clone(&exit_sig),
+            tx.clone(),
+        )
+        .await?;
         // check to exit
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -293,7 +311,7 @@ async fn main() -> Result<()> {
             "prepare client with cookie file {} to {}",
             cookie_path, args.rpc_endpoint
         );
-        chain::ClientBuilder::new()
+        depc::ClientBuilder::new()
             .set_auth_from_cookie(&cookie_path)
             .set_use_proxy(args.rpc_use_proxy)
             .set_endpoint(&args.rpc_endpoint)
@@ -301,7 +319,7 @@ async fn main() -> Result<()> {
     } else {
         info!("prepare client with user/passwd to {}", args.rpc_endpoint);
         let auth_str = format!("{}:{}", &args.rpc_user, &args.rpc_passwd);
-        chain::ClientBuilder::new()
+        depc::ClientBuilder::new()
             .set_auth(&auth_str)
             .set_use_proxy(args.rpc_use_proxy)
             .set_endpoint(&args.rpc_endpoint)
@@ -315,12 +333,19 @@ async fn main() -> Result<()> {
 
     let exit_sig = Arc::new(Mutex::new(false));
 
+    // create a channel to process deposit
+    let (tx, rx) = channel(1);
+
+    // syncing routine will also send a deposit message to the consumer
     let syncing_handler = tokio::spawn(syncing_routine(
         conn.clone(),
         client,
         args.owner_address,
         Arc::clone(&exit_sig),
+        tx,
     ));
+
+    // TODO run the consumer
 
     info!("listening on {}", args.bind);
     let app = Router::new()

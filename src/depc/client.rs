@@ -2,30 +2,34 @@ use std::fs;
 
 use log::error;
 
-use super::{req, Block, Config, Error, RpcJsonBuilder, Transaction};
+use super::{Block, Error, Transaction};
+
+use crate::rpc;
 
 pub struct Client {
-    config: Config,
+    config: rpc::Config,
 }
 
 impl Client {
     pub fn get_height(&self) -> Result<u32, Error> {
-        let rpc_json = RpcJsonBuilder::new().set_method("getblockcount").build();
-        match req(&self.config, &rpc_json) {
+        let rpc_json = rpc::RequestBuilder::new()
+            .set_method("getblockcount")
+            .build();
+        match rpc::Client::new(self.config.clone()).send(&rpc_json) {
             Ok(resp) => Ok(resp.result.as_u64().unwrap() as u32),
             Err(e) => {
                 error!("cannot execute `getheight`, reason: {e}");
-                Err(Error::General)
+                Err(Error::RpcError)
             }
         }
     }
 
     pub fn get_block_hash(&self, height: u32) -> Result<String, Error> {
-        let rpc_json = RpcJsonBuilder::new()
+        let rpc_json = rpc::RequestBuilder::new()
             .set_method("getblockhash")
             .add_param_i64("height", height as i64)
             .build();
-        match req(&self.config, &rpc_json) {
+        match rpc::Client::new(self.config.clone()).send(&rpc_json) {
             Ok(resp) => Ok(resp.result.as_str().unwrap().to_owned()),
             Err(e) => {
                 error!("cannot execute `getblockhash`, reason: {e}");
@@ -35,30 +39,30 @@ impl Client {
     }
 
     pub fn get_block(&self, block_hash: &str) -> Result<Block, Error> {
-        let rpc_json = RpcJsonBuilder::new()
+        let rpc_json = rpc::RequestBuilder::new()
             .set_method("getblock")
             .add_param_string("blockhash", block_hash)
             .build();
-        match req(&self.config, &rpc_json) {
+        match rpc::Client::new(self.config.clone()).send(&rpc_json) {
             Ok(resp) => Ok(serde_json::from_value(resp.result).unwrap()),
             Err(e) => {
                 error!("cannot execute `getblock`, reason: {e}");
-                Err(Error::General)
+                Err(Error::RpcError)
             }
         }
     }
 
     pub fn get_transaction(&self, txid: &str) -> Result<Transaction, Error> {
-        let rpc_json = RpcJsonBuilder::new()
+        let rpc_json = rpc::RequestBuilder::new()
             .set_method("getrawtransaction")
             .add_param_string("txid", txid)
             .add_param_bool("verbose", true)
             .build();
-        match req(&self.config, &rpc_json) {
+        match rpc::Client::new(self.config.clone()).send(&rpc_json) {
             Ok(resp) => Ok(serde_json::from_value(resp.result).unwrap()),
             Err(e) => {
                 error!("cannot execute `getrawtransaction`, reason: {e}");
-                Err(Error::General)
+                Err(Error::RpcError)
             }
         }
     }
@@ -111,7 +115,7 @@ impl ClientBuilder {
 
     pub fn build(self) -> Client {
         Client {
-            config: Config {
+            config: rpc::Config {
                 endpoint: self.endpoint,
                 use_proxy: self.use_proxy,
                 auth: self.auth,

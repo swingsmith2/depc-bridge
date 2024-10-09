@@ -1,23 +1,9 @@
-pub struct Deposit {
-    pub depc_txid: String,
-    pub from_depc_address: String,
-    pub to_erc20_address: String,
-    pub total: u64,
-}
-
-#[derive(Debug)]
-pub enum Error {
-    InvalidHex,
-    InvalidScript,
-    NotOPReturn,
-    InvalidStringFromScript,
-    NotErc20Address,
-}
+use super::Error;
 
 pub fn extract_string_from_script_hex(hex_str: &str) -> Result<String, Error> {
     let data = match hex::decode(hex_str) {
         Ok(r) => r,
-        Err(e) => {
+        Err(_) => {
             return Err(Error::InvalidHex);
         }
     };
