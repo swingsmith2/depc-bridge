@@ -1,9 +1,9 @@
-mod error;
-mod types;
 mod client;
+mod error;
 mod script;
+mod types;
 
-pub use error::Error;
-pub use types::*;
-pub use script::*;
 pub use client::*;
+pub use error::Error;
+pub use script::*;
+pub use types::*;

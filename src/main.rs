@@ -1,5 +1,4 @@
 mod depc;
-mod eth;
 
 mod db;
 mod rpc;
@@ -30,7 +29,7 @@ use tokio::{
     time::Duration,
 };
 
-use bridge::deposit;
+use bridge::{deposit, retrieve_chain_id, Bridge, BridgeBuilder};
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
@@ -40,28 +39,40 @@ struct Args {
     bind: String,
     /// The endpoint (http://ip:port) for depc node
     #[arg(long, default_value = "http://127.0.0.1:18732")]
-    rpc_endpoint: String,
+    depc_rpc_endpoint: String,
     /// Use cookie for RPC authentication
     #[arg(long, default_value_t = true)]
-    rpc_use_cookie: bool,
+    depc_rpc_use_cookie: bool,
     /// The path string to file `.cookie`
     #[arg(long, default_value = "$HOME/.depinc/testnet3/.cookie")]
-    rpc_cookie_path: String,
+    depc_rpc_cookie_path: String,
     /// The username for RPC authentication
     #[arg(long, default_value = "")]
-    rpc_user: String,
+    depc_rpc_user: String,
     /// The password for RPC authentication
     #[arg(long, default_value = "")]
-    rpc_passwd: String,
+    depc_rpc_passwd: String,
     /// Use proxy for the connection of RPC
     #[arg(long, default_value_t = false)]
-    rpc_use_proxy: bool,
+    depc_rpc_use_proxy: bool,
     /// The path string to local database
     #[arg(long, default_value = "$HOME/depc-bridge.sqlite3")]
     local_db: String,
     /// Monitor the chain for the owner address
     #[arg(long, default_value = "2NGWAccrksGM4TmefLN4qyW1kV7VpMngtBQ")]
     owner_address: String,
+    /// The endpoint string will be used to establish connection for ethereum calls/transactions
+    #[arg(
+        long,
+        default_value = "https://sepolia.infura.io/v3/daad1c45f9b6487288f56ff2bac9577a"
+    )]
+    eth_endpoint: String,
+    /// The contract address represent the erc20 contract
+    #[arg(long)]
+    eth_contract_address: String,
+    /// The private key to make signature
+    #[arg(long)]
+    eth_private_key: String,
 }
 
 async fn syncing_routine(
@@ -305,24 +316,27 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let client = if args.rpc_use_cookie {
-        let cookie_path = shellexpand::env(&args.rpc_cookie_path).unwrap();
+    let client = if args.depc_rpc_use_cookie {
+        let cookie_path = shellexpand::env(&args.depc_rpc_cookie_path).unwrap();
         info!(
             "prepare client with cookie file {} to {}",
-            cookie_path, args.rpc_endpoint
+            cookie_path, args.depc_rpc_endpoint
         );
         depc::ClientBuilder::new()
             .set_auth_from_cookie(&cookie_path)
-            .set_use_proxy(args.rpc_use_proxy)
-            .set_endpoint(&args.rpc_endpoint)
+            .set_use_proxy(args.depc_rpc_use_proxy)
+            .set_endpoint(&args.depc_rpc_endpoint)
             .build()
     } else {
-        info!("prepare client with user/passwd to {}", args.rpc_endpoint);
-        let auth_str = format!("{}:{}", &args.rpc_user, &args.rpc_passwd);
+        info!(
+            "prepare client with user/passwd to {}",
+            args.depc_rpc_endpoint
+        );
+        let auth_str = format!("{}:{}", &args.depc_rpc_user, &args.depc_rpc_passwd);
         depc::ClientBuilder::new()
             .set_auth(&auth_str)
-            .set_use_proxy(args.rpc_use_proxy)
-            .set_endpoint(&args.rpc_endpoint)
+            .set_use_proxy(args.depc_rpc_use_proxy)
+            .set_endpoint(&args.depc_rpc_endpoint)
             .build()
     };
 
@@ -345,8 +359,22 @@ async fn main() -> Result<()> {
         tx,
     ));
 
+    // need to retrieve the chain-id from the endpoint
+    let chain_id = retrieve_chain_id(&args.eth_endpoint).await.unwrap();
+
+    // build Bridge
+    let bridge = BridgeBuilder::new()
+        .set_endpoint(&args.eth_endpoint)
+        .unwrap()
+        .set_contract_address(&args.eth_contract_address)
+        .unwrap()
+        .set_wallet_private_key(&args.eth_private_key, chain_id.as_u64())
+        .unwrap()
+        .build()
+        .unwrap();
+
     // run the consumer to process deposit
-    let consumer_handler = tokio::spawn(deposit::consumer(rx));
+    let consumer_handler = tokio::spawn(deposit::consumer(rx, bridge));
 
     info!("listening on {}", args.bind);
     let app = Router::new()
