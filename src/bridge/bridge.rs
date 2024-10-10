@@ -99,3 +99,17 @@ pub async fn retrieve_chain_id(endpoint_str: &str) -> Result<U256, BuilderError>
         Err(BuilderError::InvalidEndpoint)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_bridge_retrieve_chain_id() {
+        let chain_id =
+            retrieve_chain_id("https://sepolia.infura.io/v3/daad1c45f9b6487288f56ff2bac9577a")
+                .await
+                .unwrap();
+        assert_eq!(chain_id.as_u64(), 11155111);
+    }
+}
