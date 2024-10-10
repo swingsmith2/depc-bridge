@@ -6,6 +6,9 @@ mod rpc;
 mod bridge;
 mod sync;
 
+mod args;
+mod cmds;
+
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -18,62 +21,18 @@ use axum::{
     Json, Router,
 };
 use chrono::DateTime;
-use clap::{command, Parser};
+use clap::Parser;
 use log::{debug, error, info, warn};
-use num_format::Locale;
-use num_format::ToFormattedString;
+use num_format::{Locale, ToFormattedString};
 use serde_json::Value;
 use tokio::{
     signal,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{channel, Sender},
     time::Duration,
 };
 
-use bridge::{deposit, retrieve_chain_id, Bridge, BridgeBuilder};
-
-#[derive(Debug, Parser)]
-#[command(version, about, long_about = None)]
-struct Args {
-    /// The address:port the web service will listen to
-    #[arg(long, default_value = "127.0.0.1:3000")]
-    bind: String,
-    /// The endpoint (http://ip:port) for depc node
-    #[arg(long, default_value = "http://127.0.0.1:18732")]
-    depc_rpc_endpoint: String,
-    /// Use cookie for RPC authentication
-    #[arg(long, default_value_t = true)]
-    depc_rpc_use_cookie: bool,
-    /// The path string to file `.cookie`
-    #[arg(long, default_value = "$HOME/.depinc/testnet3/.cookie")]
-    depc_rpc_cookie_path: String,
-    /// The username for RPC authentication
-    #[arg(long, default_value = "")]
-    depc_rpc_user: String,
-    /// The password for RPC authentication
-    #[arg(long, default_value = "")]
-    depc_rpc_passwd: String,
-    /// Use proxy for the connection of RPC
-    #[arg(long, default_value_t = false)]
-    depc_rpc_use_proxy: bool,
-    /// The path string to local database
-    #[arg(long, default_value = "$HOME/depc-bridge.sqlite3")]
-    local_db: String,
-    /// Monitor the chain for the owner address
-    #[arg(long, default_value = "2NGWAccrksGM4TmefLN4qyW1kV7VpMngtBQ")]
-    owner_address: String,
-    /// The endpoint string will be used to establish connection for ethereum calls/transactions
-    #[arg(
-        long,
-        default_value = "https://sepolia.infura.io/v3/daad1c45f9b6487288f56ff2bac9577a"
-    )]
-    eth_endpoint: String,
-    /// The contract address represent the erc20 contract
-    #[arg(long)]
-    eth_contract_address: String,
-    /// The private key to make signature
-    #[arg(long)]
-    eth_private_key: String,
-}
+use args::{Args, Commands};
+use bridge::{deposit, retrieve_chain_id, BridgeBuilder};
 
 async fn syncing_routine(
     conn: db::Conn,
@@ -316,86 +275,93 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let client = if args.depc_rpc_use_cookie {
-        let cookie_path = shellexpand::env(&args.depc_rpc_cookie_path).unwrap();
-        info!(
-            "prepare client with cookie file {} to {}",
-            cookie_path, args.depc_rpc_endpoint
-        );
-        depc::ClientBuilder::new()
-            .set_auth_from_cookie(&cookie_path)
-            .set_use_proxy(args.depc_rpc_use_proxy)
-            .set_endpoint(&args.depc_rpc_endpoint)
-            .build()
-    } else {
-        info!(
-            "prepare client with user/passwd to {}",
-            args.depc_rpc_endpoint
-        );
-        let auth_str = format!("{}:{}", &args.depc_rpc_user, &args.depc_rpc_passwd);
-        depc::ClientBuilder::new()
-            .set_auth(&auth_str)
-            .set_use_proxy(args.depc_rpc_use_proxy)
-            .set_endpoint(&args.depc_rpc_endpoint)
-            .build()
-    };
+    match args.command {
+        Commands::Run(args) => {
+            let client = if args.depc_rpc_use_cookie {
+                let cookie_path = shellexpand::env(&args.depc_rpc_cookie_path).unwrap();
+                info!(
+                    "prepare client with cookie file {} to {}",
+                    cookie_path, args.depc_rpc_endpoint
+                );
+                depc::ClientBuilder::new()
+                    .set_auth_from_cookie(&cookie_path)
+                    .set_use_proxy(args.depc_rpc_use_proxy)
+                    .set_endpoint(&args.depc_rpc_endpoint)
+                    .build()
+            } else {
+                info!(
+                    "prepare client with user/passwd to {}",
+                    args.depc_rpc_endpoint
+                );
+                let auth_str = format!("{}:{}", &args.depc_rpc_user, &args.depc_rpc_passwd);
+                depc::ClientBuilder::new()
+                    .set_auth(&auth_str)
+                    .set_use_proxy(args.depc_rpc_use_proxy)
+                    .set_endpoint(&args.depc_rpc_endpoint)
+                    .build()
+            };
 
-    let db_path = shellexpand::env(&args.local_db).unwrap();
-    let conn = db::Conn::open_or_create(&db_path).unwrap();
-    conn.init()?;
-    info!("connected to local database, path {}", db_path);
+            let db_path = shellexpand::env(&args.local_db).unwrap();
+            let conn = db::Conn::open_or_create(&db_path).unwrap();
+            conn.init()?;
+            info!("connected to local database, path {}", db_path);
 
-    let exit_sig = Arc::new(Mutex::new(false));
+            let exit_sig = Arc::new(Mutex::new(false));
 
-    // create a channel to process deposit
-    let (tx, rx) = channel(1);
+            // create a channel to process deposit
+            let (tx, rx) = channel(1);
 
-    // syncing routine will also send a deposit message to the consumer
-    let syncing_handler = tokio::spawn(syncing_routine(
-        conn.clone(),
-        client,
-        args.owner_address,
-        Arc::clone(&exit_sig),
-        tx,
-    ));
+            // syncing routine will also send a deposit message to the consumer
+            let syncing_handler = tokio::spawn(syncing_routine(
+                conn.clone(),
+                client,
+                args.owner_address,
+                Arc::clone(&exit_sig),
+                tx,
+            ));
 
-    // need to retrieve the chain-id from the endpoint
-    let chain_id = retrieve_chain_id(&args.eth_endpoint).await.unwrap();
+            // need to retrieve the chain-id from the endpoint
+            let chain_id = retrieve_chain_id(&args.eth_endpoint).await.unwrap();
 
-    // build Bridge
-    let bridge = BridgeBuilder::new()
-        .set_endpoint(&args.eth_endpoint)
-        .unwrap()
-        .set_contract_address(&args.eth_contract_address)
-        .unwrap()
-        .set_wallet_private_key(&args.eth_private_key, chain_id.as_u64())
-        .unwrap()
-        .build()
-        .unwrap();
+            // build Bridge
+            let bridge = BridgeBuilder::new()
+                .set_endpoint(&args.eth_endpoint)
+                .unwrap()
+                .set_contract_address(&args.eth_contract_address)
+                .unwrap()
+                .set_wallet_private_key(&args.eth_private_key, chain_id.as_u64())
+                .unwrap()
+                .build()
+                .unwrap();
 
-    // run the consumer to process deposit
-    let consumer_handler = tokio::spawn(deposit::consumer(rx, bridge));
+            // run the consumer to process deposit
+            let consumer_handler = tokio::spawn(deposit::consumer(rx, bridge));
 
-    info!("listening on {}", args.bind);
-    let app = Router::new()
-        .route("/", get(get_root))
-        .route("/exchange/analyze/:txid", get(get_exchange_addresses))
-        .route("/exchange/balances/:days", get(generate_exchange_balances))
-        .with_state(Arc::new(ServerData {
-            conn,
-            exit: Arc::clone(&exit_sig),
-        }));
-    let listener = tokio::net::TcpListener::bind(args.bind).await.unwrap();
+            info!("listening on {}", args.bind);
+            let app = Router::new()
+                .route("/", get(get_root))
+                .route("/exchange/analyze/:txid", get(get_exchange_addresses))
+                .route("/exchange/balances/:days", get(generate_exchange_balances))
+                .with_state(Arc::new(ServerData {
+                    conn,
+                    exit: Arc::clone(&exit_sig),
+                }));
+            let listener = tokio::net::TcpListener::bind(args.bind).await.unwrap();
 
-    info!("web server is running...");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(exit_sig))
-        .await
-        .unwrap();
+            info!("web server is running...");
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown_signal(exit_sig))
+                .await
+                .unwrap();
 
-    info!("web server exits.");
-    syncing_handler.await.unwrap().unwrap();
+            info!("web server exits.");
+            syncing_handler.await.unwrap().unwrap();
 
-    info!("exit.");
-    Ok(())
+            info!("exit.");
+            Ok(())
+        }
+        Commands::Deploy(deploy) => {
+            todo!("complete this command")
+        }
+    }
 }
