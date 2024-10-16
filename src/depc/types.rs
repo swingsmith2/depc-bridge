@@ -1,5 +1,9 @@
 use serde::Deserialize;
 
+pub type Address = String;
+pub type Amount = u64;
+pub type TxID = String;
+
 #[derive(Deserialize)]
 pub struct Block {
     pub hash: String,

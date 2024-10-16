@@ -39,6 +39,9 @@ const SQL_MARK_COIN_SPENT: &str =
     "update coins set is_spent = true, spent_txid = ?, spent_height = ? where txid = ? and n = ?";
 
 /// Table `deposit`
+/// the reson I removed `from_address_depc` is because it's a bit more complex of the UTXO model,
+/// A transaction might contains more than one incoming addresses. We might need to create
+/// a slave table contains the addresses which are related to a deposit.
 const SQL_CREATE_TABLE_DEPC_DEPOSIT: &str = "create table if not exists depc_deposit (depc_txid, depc_timestamp, to_address_erc20, amount, erc20_txid, erc20_timestamp)";
 const SQL_CREATE_UNIQUE_INDEX_DEPC_DEPOSIT_DEPC_TXID: &str =
     "create unique index if not exists index__depc_deposit_depc_txid on depc_deposit (depc_txid)";
@@ -49,9 +52,9 @@ const SQL_UPDATE_DEPC_DEPSOIT: &str =
 /// Table `withdraw`
 const SQL_CREATE_TABLE_DEPC_WITHDRAW: &str = "create table if not exists depc_withdraw (erc20_txid, erc20_timestamp, from_address_erc20, to_address_depc, amount, depc_txid, depc_timestamp)";
 const SQL_CREATE_UNIQUE_INDEX_DEPC_WITHDRAW_ERC20_TXID: &str = "create unique index if not exists index__depc_withdraw_erc20_txid on depc_withdraw (erc20_txid)";
-const SQL_INSERT_DEPC_WITHDRAW: &str = "insert into depc_withdraw (erc20_txid, erc20_timestamp, from_address_erc20, to_address_depc, amount) values (?, ?, ?, ?, ?)";
+const SQL_INSERT_DEPC_WITHDRAW: &str = "insert into depc_withdraw (erc20_txid, erc20_timestamp, from_address_erc20, amount) values (?, ?, ?, ?)";
 const SQL_UPDATE_DEPC_WITHDRAW: &str =
-    "update depc_withdraw set depc_txid = ?, depc_timestamp = ? where erc20_txid = ?";
+    "update depc_withdraw set depc_txid = ?, depc_timestamp = ?, to_address_depc = ? where erc20_txid = ?";
 const SQL_QUERY_BEST_HEIGHT: &str = "select height from blocks order by height desc limit 1";
 const SQL_QUERY_ADDRESSES_FROM_TX_INPUTS: &str =
     "select owner from coins where spent_txid = ? and is_spent = true";
@@ -212,19 +215,12 @@ impl Conn {
         erc20_txid: &str,
         erc20_timestamp: u64,
         from_address_erc20: &str,
-        to_address_depc: &str,
         amount: u64,
     ) -> Result<(), Error> {
         let c = self.conn.lock().unwrap();
         c.execute(
             SQL_INSERT_DEPC_WITHDRAW,
-            params![
-                erc20_txid,
-                erc20_timestamp,
-                from_address_erc20,
-                to_address_depc,
-                amount
-            ],
+            params![erc20_txid, erc20_timestamp, from_address_erc20, amount],
         )?;
         Ok(())
     }
@@ -233,12 +229,13 @@ impl Conn {
         &self,
         depc_txid: &str,
         depc_timestamp: u64,
+        depc_address: &str,
         erc20_txid: &str,
     ) -> Result<(), Error> {
         let c = self.conn.lock().unwrap();
         c.execute(
             SQL_UPDATE_DEPC_WITHDRAW,
-            params![depc_txid, depc_timestamp, erc20_txid],
+            params![depc_txid, depc_timestamp, depc_address, erc20_txid],
         )?;
         Ok(())
     }
@@ -378,15 +375,9 @@ mod tests {
         let conn = Conn::open_in_mem().unwrap();
         conn.init().unwrap();
 
-        conn.make_withdraw(
-            "erc20_txid",
-            193847845,
-            "from_address",
-            "to_address",
-            1000000,
-        )
-        .unwrap();
-        conn.confirm_withdraw("depc_txid", 193848478, "erc20_txid")
+        conn.make_withdraw("erc20_txid", 193847845, "from_address", 1000000)
+            .unwrap();
+        conn.confirm_withdraw("depc_txid", 193848478, "erc20_txid", "depc_address")
             .unwrap();
     }
 }

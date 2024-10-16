@@ -4,8 +4,6 @@ use anyhow::Result;
 use log::{error, info};
 use tokio::sync::mpsc::Sender;
 
-use crate::bridge::deposit::Deposit;
-use crate::bridge::Address;
 use crate::db::Conn;
 use crate::depc::{extract_string_from_script_hex, Client};
 
@@ -14,7 +12,6 @@ pub async fn sync(
     client: &Client,
     owner_address: &str,
     exit_sig: Arc<Mutex<bool>>,
-    tx: Sender<Deposit>,
 ) -> Result<()> {
     let mut sync_height = if let Some(height) = conn.query_best_height() {
         height + 1
@@ -50,7 +47,7 @@ pub async fn sync(
             // transactions
             for txid in block.tx.iter() {
                 let transaction = client.get_transaction(txid)?;
-                let mut erc20_address = None;
+                let mut deposit_info = None;
                 assert_eq!(transaction.txid, *txid);
                 conn.add_transaction(&block_hash, txid)?;
                 for txin in transaction.vin.iter() {
@@ -84,30 +81,13 @@ pub async fn sync(
                         if let Ok(address) =
                             extract_string_from_script_hex(&txout.script_pubkey.hex)
                         {
-                            erc20_address = Some(address);
+                            deposit_info = Some(address);
                         }
                     }
                 }
-                if erc20_address.is_some() && amount > 0 {
-                    let address_str = erc20_address.unwrap();
-                    match address_str.parse::<Address>() {
-                        Ok(address) => {
-                            // extract data from the transaction
-                            conn.make_deposit(&transaction.txid, &address_str, amount, block.time)?;
-                            // deliver to the consumer for making deposit to erc20
-                            let deposit = Deposit {
-                                erc20_address: address,
-                                amount,
-                            };
-                            tx.send(deposit).await?;
-                        }
-                        Err(e) => {
-                            error!(
-                                "the ethereum address '{}' is invalid, reason: {}",
-                                address_str, e
-                            );
-                        }
-                    }
+                if deposit_info.is_some() && amount > 0 {
+                    let deposit_info = deposit_info.unwrap();
+                    todo!("process the deposit info, delive it to bridge.");
                 }
             }
         }

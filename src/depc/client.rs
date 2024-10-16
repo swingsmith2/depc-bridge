@@ -2,10 +2,11 @@ use std::fs;
 
 use log::error;
 
-use super::{Block, Error, Transaction};
+use super::{Block, Error, Transaction, Address, Amount, TxID};
 
 use crate::rpc;
 
+#[derive(Clone)]
 pub struct Client {
     config: rpc::Config,
 }
@@ -65,6 +66,10 @@ impl Client {
                 Err(Error::RpcError)
             }
         }
+    }
+
+    pub fn transfer(&self, from_address: &Address, to_address: &Address, amount: Amount) -> Result<TxID, Error> {
+        todo!("complete this method")
     }
 }
 

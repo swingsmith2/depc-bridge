@@ -1,9 +1,11 @@
 mod depc;
+mod solana;
+
+mod bridge;
 
 mod db;
 mod rpc;
 
-mod bridge;
 mod sync;
 
 mod args;
@@ -32,14 +34,12 @@ use tokio::{
 };
 
 use args::{Args, Commands};
-use bridge::{deposit, retrieve_chain_id, BridgeBuilder};
 
 async fn syncing_routine(
     conn: db::Conn,
     client: depc::Client,
     owner_address: String,
     exit_sig: Arc<Mutex<bool>>,
-    tx: Sender<deposit::Deposit>,
 ) -> Result<()> {
     loop {
         {
@@ -54,7 +54,6 @@ async fn syncing_routine(
             &client,
             &owner_address,
             Arc::clone(&exit_sig),
-            tx.clone(),
         )
         .await?;
         // check to exit
@@ -309,7 +308,7 @@ async fn main() -> Result<()> {
             let exit_sig = Arc::new(Mutex::new(false));
 
             // create a channel to process deposit
-            let (tx, rx) = channel(1);
+            // let (tx, rx) = channel(1);
 
             // syncing routine will also send a deposit message to the consumer
             let syncing_handler = tokio::spawn(syncing_routine(
@@ -317,25 +316,21 @@ async fn main() -> Result<()> {
                 client,
                 args.owner_address,
                 Arc::clone(&exit_sig),
-                tx,
             ));
 
-            // need to retrieve the chain-id from the endpoint
-            let chain_id = retrieve_chain_id(&args.eth_endpoint).await.unwrap();
-
-            // build Bridge
-            let bridge = BridgeBuilder::new()
-                .set_endpoint(&args.eth_endpoint)
-                .unwrap()
-                .set_contract_address(&args.eth_contract_address)
-                .unwrap()
-                .set_wallet_private_key(&args.eth_private_key, chain_id.as_u64())
-                .unwrap()
-                .build()
-                .unwrap();
+            // // build Bridge
+            // let bridge = BridgeBuilder::new()
+            //     .set_endpoint(&args.eth_endpoint)
+            //     .unwrap()
+            //     .set_contract_address(&args.eth_contract_address)
+            //     .unwrap()
+            //     .set_wallet_private_key(&args.eth_private_key, chain_id.as_u64())
+            //     .unwrap()
+            //     .build()
+            //     .unwrap();
 
             // run the consumer to process deposit
-            let consumer_handler = tokio::spawn(deposit::consumer(rx, bridge));
+            // let consumer_handler = tokio::spawn(deposit::consumer(rx, bridge));
 
             info!("listening on {}", args.bind);
             let app = Router::new()

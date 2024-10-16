@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use super::cmds::{Run, Deploy};
+use super::cmds::{Deploy, Run};
 
 #[derive(Subcommand)]
 pub enum Commands {
