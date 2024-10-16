@@ -16,11 +16,11 @@ use crate::depc::{
     Client as DePCClient, TxID as DePCTxID,
 };
 
-pub trait ContractClient {
+pub trait ContractClient: Send {
     type Error: std::fmt::Display;
-    type Address: Into<String> + From<String> + Copy;
-    type Amount: Into<u64> + From<u64> + Copy;
-    type TxID: Into<String> + From<String> + Copy;
+    type Address: Into<String> + From<String> + Copy + Send;
+    type Amount: Into<u64> + From<u64> + Copy + Send;
+    type TxID: Into<String> + From<String> + Copy + Send;
 
     fn send(&self, address: Self::Address, amount: Self::Amount)
         -> Result<Self::TxID, Self::Error>;
@@ -36,29 +36,29 @@ pub struct WithdrawInfo {
     amount: DePCAmount,
 }
 
-pub struct DepositInfo<C: ContractClient> {
-    address: C::Address,
-    amount: C::Amount,
+pub struct DepositInfo<Address, Amount> {
+    address: Address,
+    amount: Amount,
 }
 
 pub struct Bridge<C>
 where
-    C: ContractClient,
+    C: ContractClient + Send,
 {
     exit_sig: Arc<Mutex<bool>>,
     conn: db::Conn,
     depc_client: DePCClient,
     depc_owner_address: DePCAddress,
     contract_client: C,
-    tx_deposit: Sender<DepositInfo<C>>,
-    rx_deposit: Receiver<DepositInfo<C>>,
+    tx_deposit: Sender<DepositInfo<C::Address, C::Amount>>,
+    rx_deposit: Receiver<DepositInfo<C::Address, C::Amount>>,
     tx_withdraw: Sender<WithdrawInfo>,
     rx_withdraw: Receiver<WithdrawInfo>,
 }
 
 impl<C> Bridge<C>
 where
-    C: ContractClient,
+    C: ContractClient + Clone + 'static,
 {
     pub fn new(
         conn: db::Conn,
@@ -66,7 +66,7 @@ where
         depc_owner_address: DePCAddress,
         contract_client: C,
     ) -> Self {
-        let (tx_deposit, rx_deposit) = channel::<DepositInfo<C>>(1);
+        let (tx_deposit, rx_deposit) = channel::<DepositInfo<C::Address, C::Amount>>(1);
         let (tx_withdraw, rx_withdraw) = channel::<WithdrawInfo>(1);
         Bridge::<C> {
             exit_sig: Arc::new(Mutex::new(false)),
@@ -81,21 +81,43 @@ where
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
-        // let withdraw_making_handler = tokio::spawn(Bridge::<C>::withdraw_making(Arc::clone(&bridge)));
-        // withdraw_making_handler.await;
-        // Ok(())
+    pub async fn run(self) -> Result<()> {
+        let mut tasks = vec![];
 
         let withdraw_making_task = tokio::spawn(withdraw_making(
             Arc::clone(&self.exit_sig),
             self.rx_withdraw,
-            self.depc_owner_address,
-            self.depc_client,
+            self.depc_owner_address.clone(),
+            self.depc_client.clone(),
         ));
+        tasks.push(withdraw_making_task);
 
-        join!(withdraw_making_task);
+        let deposit_making_task = tokio::spawn(deposit_making(
+            Arc::clone(&self.exit_sig),
+            self.rx_deposit,
+            self.contract_client.clone(),
+            self.conn.clone(),
+        ));
+        tasks.push(deposit_making_task);
 
-        todo!("complete this method");
+        let depc_syncing_task = tokio::spawn(run_depc_syncing::<C>(
+            Arc::clone(&self.exit_sig),
+            self.conn.clone(),
+            self.depc_client,
+            self.depc_owner_address,
+            self.tx_deposit,
+        ));
+        tasks.push(depc_syncing_task);
+
+        let sol_syncing_task = tokio::spawn(run_sol_syncing::<C>(
+            Arc::clone(&self.exit_sig),
+            self.contract_client,
+            self.conn,
+        ));
+        tasks.push(sol_syncing_task);
+
+        futures::future::join_all(tasks).await;
+        Ok(())
     }
 }
 
@@ -120,14 +142,14 @@ pub async fn withdraw_making(
     Ok(())
 }
 
-pub async fn deposit_making<C>(
+pub async fn deposit_making<'a, C>(
     exit_sig: Arc<Mutex<bool>>,
-    mut rx_deposit: Receiver<DepositInfo<C>>,
+    mut rx_deposit: Receiver<DepositInfo<C::Address, C::Amount>>,
     contract_client: C,
     conn: db::Conn,
 ) -> Result<()>
 where
-    C: ContractClient,
+    C: ContractClient + 'a,
 {
     loop {
         {
@@ -160,7 +182,7 @@ pub async fn run_depc_syncing<C>(
     conn: db::Conn,
     depc_client: DePCClient,
     depc_owner_address: DePCAddress,
-    tx_deposit: Sender<DepositInfo<C>>,
+    tx_deposit: Sender<DepositInfo<C::Address, C::Amount>>,
 ) -> Result<()>
 where
     C: ContractClient,
