@@ -5,7 +5,6 @@ use log::{error, info};
 
 use anyhow::Result;
 use tokio::{
-    join,
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
@@ -262,7 +261,8 @@ where
                     let to_erc20_address_str = deposit_info.unwrap();
                     conn.make_deposit(txid, &to_erc20_address_str, amount, block.time)
                         .unwrap();
-                    // we need to put this deposit to the consumer thread to make it happend on solana network
+                    // we need to put this deposit to the consumer thread to make it happend on
+                    // solana network
                     tx_deposit
                         .send(DepositInfo {
                             address: to_erc20_address_str.into(),
