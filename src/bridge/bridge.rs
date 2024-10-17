@@ -141,14 +141,14 @@ pub async fn withdraw_making(
     Ok(())
 }
 
-pub async fn deposit_making<'a, C>(
+pub async fn deposit_making<C>(
     exit_sig: Arc<Mutex<bool>>,
     mut rx_deposit: Receiver<DepositInfo<C::Address, C::Amount>>,
     contract_client: C,
     conn: db::Conn,
 ) -> Result<()>
 where
-    C: ContractClient + 'a,
+    C: ContractClient,
 {
     loop {
         {
