@@ -1,1 +1,3 @@
-pub mod bridge;
+mod bridge;
+
+pub use bridge::*;

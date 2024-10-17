@@ -15,14 +15,18 @@ use crate::depc::{
     Client as DePCClient, TxID as DePCTxID,
 };
 
-pub trait ContractClient: Send {
+pub trait ContractClient {
     type Error: std::fmt::Display;
-    type Address: Into<String> + From<String> + Copy + Send;
-    type Amount: Into<u64> + From<u64> + Copy + Send;
-    type TxID: Into<String> + From<String> + Copy + Send;
+    type Address: Into<String> + From<String> + Clone + Send;
+    type Amount: Into<u64> + From<u64> + Clone + Send;
+    type TxID: Into<String> + From<String> + Clone + Send;
 
-    fn send(&self, address: Self::Address, amount: Self::Amount)
-        -> Result<Self::TxID, Self::Error>;
+    fn send(
+        &self,
+        sender_address: Self::Address,
+        recipient_address: Self::Address,
+        amount: Self::Amount,
+    ) -> Result<Self::TxID, Self::Error>;
 
     fn load_unfinished_withdrawals(
         &self,
@@ -36,13 +40,14 @@ pub struct WithdrawInfo {
 }
 
 pub struct DepositInfo<Address, Amount> {
-    address: Address,
+    sender_address: Address,
+    recipient_address: Address,
     amount: Amount,
 }
 
 pub struct Bridge<C>
 where
-    C: ContractClient + Send,
+    C: ContractClient,
 {
     exit_sig: Arc<Mutex<bool>>,
     conn: db::Conn,
@@ -57,7 +62,7 @@ where
 
 impl<C> Bridge<C>
 where
-    C: ContractClient + Clone + 'static,
+    C: ContractClient + Clone + 'static + Send,
 {
     pub fn new(
         conn: db::Conn,
@@ -158,7 +163,11 @@ where
             }
         }
         if let Some(deposit) = rx_deposit.recv().await {
-            match contract_client.send(deposit.address, deposit.amount) {
+            match contract_client.send(
+                deposit.sender_address,
+                deposit.recipient_address,
+                deposit.amount,
+            ) {
                 Ok(txid) => {
                     // update database
                     conn.confirm_deposit(&(txid).into(), get_curr_timestamp(), "")?;
@@ -265,7 +274,8 @@ where
                     // solana network
                     tx_deposit
                         .send(DepositInfo {
-                            address: to_erc20_address_str.into(),
+                            sender_address: "TODO the sender address should be retrieved from config or command-line arguments".to_owned().into(),
+                            recipient_address: to_erc20_address_str.into(),
                             amount: amount.into(),
                         })
                         .await
@@ -305,10 +315,10 @@ where
                             .as_secs();
                         // we need to save the withdrawal into database
                         conn.make_withdraw(
-                            &(*txid).into(),
+                            &(txid.clone()).into(),
                             timestamp,
-                            &(*address).into(),
-                            (*amount).into(),
+                            &(address.clone()).into(),
+                            (amount.clone()).into(),
                         )
                         .unwrap();
                     }
