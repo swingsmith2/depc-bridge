@@ -338,3 +338,14 @@ fn get_curr_timestamp() -> u64 {
         .unwrap()
         .as_secs()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_curr_timestamp() {
+        let timestamp = get_curr_timestamp();
+        assert!(timestamp > 0);
+    }
+}
