@@ -25,18 +25,14 @@ impl ClientBuilder {
     pub fn build(self) -> Result<Client, Error> {
         if self.url.is_none() {
             return Err(Error::MissingUrl);
-        } else if self.payer.is_none() {
-            return Err(Error::MissingPayer);
-        } else if self.contract_address.is_none() {
-            return Err(Error::MissingContractAddress);
         }
         Ok(Client {
             rpc_client: RpcClient::new_with_commitment(
                 self.url.unwrap(),
                 CommitmentConfig::confirmed(),
             ),
-            payer: self.payer.unwrap(),
-            contract_address: self.contract_address.unwrap(),
+            payer: self.payer,
+            contract_address: self.contract_address,
         })
     }
 
@@ -71,5 +67,15 @@ mod tests {
     #[test]
     fn client_builder_missing_fields() {
         assert!(ClientBuilder::new().build().is_err());
+    }
+
+    #[test]
+    fn test_solana_client_builder_complete_fields() {
+        let client = ClientBuilder::new()
+            .set_url("http://127.0.0.1:8899")
+            .build()
+            .unwrap();
+        let height = client.get_height().unwrap();
+        assert!(height > 0);
     }
 }
