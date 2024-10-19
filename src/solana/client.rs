@@ -2,7 +2,6 @@ use std::str::FromStr;
 
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
@@ -13,83 +12,14 @@ use solana_transaction_status::{
 };
 use spl_token::instruction::transfer;
 
-use anyhow::Result;
-
 use crate::bridge::ContractClient;
 
-pub enum Error {
-    MissingUrl,
-    MissingPayer,
-    MissingContractAddress,
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "something is wrong")
-    }
-}
-
-pub struct ClientBuilder {
-    url: Option<String>,
-    payer: Option<Keypair>,
-    contract_address: Option<Pubkey>,
-}
-
-impl ClientBuilder {
-    pub fn new() -> ClientBuilder {
-        ClientBuilder {
-            url: None,
-            payer: None,
-            contract_address: None,
-        }
-    }
-
-    pub fn build(self) -> Result<Client, Error> {
-        if self.url.is_none() {
-            return Err(Error::MissingUrl);
-        } else if self.payer.is_none() {
-            return Err(Error::MissingPayer);
-        } else if self.contract_address.is_none() {
-            return Err(Error::MissingContractAddress);
-        }
-        Ok(Client {
-            rpc_client: RpcClient::new_with_commitment(
-                self.url.unwrap(),
-                CommitmentConfig::confirmed(),
-            ),
-            payer: self.payer.unwrap(),
-            contract_address: self.contract_address.unwrap(),
-        })
-    }
-
-    pub fn set_url<U>(mut self, url: U) -> ClientBuilder
-    where
-        U: ToString,
-    {
-        self.url = Some(url.to_string());
-        self
-    }
-
-    pub fn set_url_devnet(mut self) -> ClientBuilder {
-        self.url = Some("https://api.devnet.solana.com".to_owned());
-        self
-    }
-
-    pub fn set_payer_from_base58_string(mut self, s: &str) -> ClientBuilder {
-        self.payer = Some(Keypair::from_base58_string(s));
-        self
-    }
-
-    pub fn set_contract_address(mut self, s: &str) -> ClientBuilder {
-        self.contract_address = Some(Pubkey::from_str(s).unwrap());
-        self
-    }
-}
+use super::Error;
 
 pub struct Client {
-    rpc_client: RpcClient,
-    payer: Keypair,
-    contract_address: Pubkey,
+    pub(crate) rpc_client: RpcClient,
+    pub(crate) payer: Keypair,
+    pub(crate) contract_address: Pubkey,
 }
 
 impl ContractClient for Client {
