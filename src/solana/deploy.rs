@@ -1,6 +1,5 @@
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     program_pack::Pack,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -85,7 +84,8 @@ impl Deploy {
         );
 
         let res = self.rpc_client.send_and_confirm_transaction(&transaction);
-        if res.is_err() {
+        if let Err(e) = res {
+            println!("failed to send and confirm transaction, reason: {}", e);
             return Err(Error::CannotSendTransaction);
         }
         let signature = res.unwrap();
@@ -135,5 +135,22 @@ impl Deploy {
         }
         let signature = res.unwrap();
         Ok(signature)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deploy() {
+        let deploy = Builder::new()
+            .set_url_localhost()
+            .set_random_mint_key()
+            .set_random_authority_key()
+            .build::<Deploy>()
+            .unwrap();
+        let signature = deploy.deploy().unwrap();
+        println!("signature: {}", signature);
     }
 }

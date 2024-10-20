@@ -46,12 +46,9 @@ impl Querier {
         let token_account = res.unwrap();
         Ok(token_account.amount)
     }
+}
 
-    pub fn get_height(&self) -> Result<u64, Error> {
-        if let Ok(height) = self.rpc_client.get_block_height() {
-            Ok(height)
-        } else {
-            Err(Error::CannotGetBlockHeight)
-        }
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 }

@@ -55,18 +55,6 @@ impl TokenClient for Client {
         recipient_address: Self::Address,
         amount: Self::Amount,
     ) -> Result<Self::TxID, Self::Error> {
-        // let contract_address = if let Some(contract_address) = self.mint_pubkey {
-        //     contract_address
-        // } else {
-        //     return Err(Error::MissingRequiredField);
-        // };
-
-        // let payer = if let Some(payer) = &self.authority_key {
-        //     payer
-        // } else {
-        //     return Err(Error::MissingRequiredField);
-        // };
-
         // Define the sender's token account, recipient, and the token mint
         let sender_token_account = Pubkey::from_str(&sender_address).unwrap();
         let recipient_token_account = Pubkey::from_str(&recipient_address).unwrap();

@@ -13,6 +13,7 @@ pub struct Builder {
     pub(crate) authority_key: Option<Keypair>,
     pub(crate) mint_key: Option<Keypair>,
     pub(crate) mint_pubkey: Option<Pubkey>,
+    pub(crate) target_pubkey: Option<Pubkey>,
 }
 
 impl Builder {
@@ -22,6 +23,7 @@ impl Builder {
             authority_key: None,
             mint_key: None,
             mint_pubkey: None,
+            target_pubkey: None,
         }
     }
 
@@ -65,7 +67,7 @@ impl Builder {
         self
     }
 
-    pub fn make_random_authority_key(self) -> Self {
+    pub fn set_random_authority_key(self) -> Self {
         self.set_authority_key(Keypair::new())
     }
 
@@ -80,6 +82,11 @@ impl Builder {
 
     pub fn set_mint_pubkey(mut self, mint_pubkey: Pubkey) -> Self {
         self.mint_pubkey = Some(mint_pubkey);
+        self
+    }
+
+    pub fn set_target_pubkey(mut self, target_pubkey: Pubkey) -> Self {
+        self.target_pubkey = Some(target_pubkey);
         self
     }
 }
