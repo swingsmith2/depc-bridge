@@ -1,7 +1,13 @@
+#[derive(Debug)]
 pub enum Error {
-    MissingUrl,
-    MissingPayer,
-    MissingContractAddress,
+    MissingRequiredField,
+    CannotCreateMintInstructions,
+    CannotGetLatestBlockHash,
+    CannotGetBlockHeight,
+    CannotSendTransaction,
+    CannotMakeMintTransaction,
+    CannotGetAccountData,
+    CannotUnpackAccountData,
 }
 
 impl std::fmt::Display for Error {

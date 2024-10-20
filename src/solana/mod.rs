@@ -1,9 +1,15 @@
 mod client;
-mod client_builder;
+mod deploy;
+mod query;
+
+mod builder;
 
 mod error;
 
 pub use client::*;
-pub use client_builder::*;
+pub use deploy::*;
+pub use query::*;
+
+pub use builder::*;
 
 pub use error::*;

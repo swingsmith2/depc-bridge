@@ -21,6 +21,7 @@ shellexpand = "3.1.0"
 solana-client = "2.0.13"
 solana-sdk = "2.0.13"
 solana-transaction-status = "2.0.13"
+spl-associated-token-account = "5.0.1"
 # solana-client = "2.0.13"
 spl-token = "6.0.0"
 tokio = { version = "1.40.0", features = ["full"] }

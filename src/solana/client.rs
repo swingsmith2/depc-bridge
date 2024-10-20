@@ -12,17 +12,38 @@ use solana_transaction_status::{
 };
 use spl_token::instruction::transfer;
 
-use crate::bridge::ContractClient;
+use crate::bridge::TokenClient;
 
-use super::Error;
+use super::{Builder, Error, NewFromBuilder};
 
 pub struct Client {
-    pub(crate) rpc_client: RpcClient,
-    pub(crate) payer: Option<Keypair>,
-    pub(crate) contract_address: Option<Pubkey>,
+    rpc_client: RpcClient,
+    authority_key: Keypair,
+    mint_pubkey: Pubkey,
 }
 
-impl ContractClient for Client {
+impl NewFromBuilder for Client {
+    type T = Client;
+
+    fn new_from_builder(builder: Builder) -> Result<Self::T, Error> {
+        let rpc_client = builder.new_rpc_client()?;
+        if builder.authority_key.is_none() {
+            return Err(Error::MissingRequiredField);
+        }
+        let authority_key = builder.authority_key.unwrap();
+        if builder.mint_pubkey.is_none() {
+            return Err(Error::MissingRequiredField);
+        }
+        let mint_pubkey = builder.mint_pubkey.unwrap();
+        Ok(Client {
+            rpc_client,
+            authority_key,
+            mint_pubkey,
+        })
+    }
+}
+
+impl TokenClient for Client {
     type Error = Error;
     type Address = String;
     type Amount = u64;
@@ -34,17 +55,17 @@ impl ContractClient for Client {
         recipient_address: Self::Address,
         amount: Self::Amount,
     ) -> Result<Self::TxID, Self::Error> {
-        let contract_address = if let Some(contract_address) = self.contract_address {
-            contract_address
-        } else {
-            return Err(Error::MissingContractAddress);
-        };
+        // let contract_address = if let Some(contract_address) = self.mint_pubkey {
+        //     contract_address
+        // } else {
+        //     return Err(Error::MissingRequiredField);
+        // };
 
-        let payer = if let Some(payer) = &self.payer {
-            payer
-        } else {
-            return Err(Error::MissingPayer);
-        };
+        // let payer = if let Some(payer) = &self.authority_key {
+        //     payer
+        // } else {
+        //     return Err(Error::MissingRequiredField);
+        // };
 
         // Define the sender's token account, recipient, and the token mint
         let sender_token_account = Pubkey::from_str(&sender_address).unwrap();
@@ -52,24 +73,24 @@ impl ContractClient for Client {
 
         // Create the SPL token transfer instruction
         let transfer_instruction = transfer(
-            &contract_address,
-            &sender_token_account,    // Sender's token account
-            &recipient_token_account, // Recipient's token account
-            &payer.pubkey(),          // Authority of the sender (usually the owner's public key)
-            &[],                      // Signers (empty if the sender is the payer/owner)
-            amount,                   // Amount to transfer
+            &self.mint_pubkey,
+            &sender_token_account,        // Sender's token account
+            &recipient_token_account,     // Recipient's token account
+            &self.authority_key.pubkey(), // Authority of the sender (usually the owner's public key)
+            &[],                          // Signers (empty if the sender is the payer/owner)
+            amount,                       // Amount to transfer
         )
         .unwrap();
 
         // Create a new transaction
         let mut transaction = Transaction::new_with_payer(
-            &[transfer_instruction], // Instructions for the transfer
-            Some(&payer.pubkey()),   // Payer for transaction fees
+            &[transfer_instruction],            // Instructions for the transfer
+            Some(&self.authority_key.pubkey()), // Payer for transaction fees
         );
 
         // Get recent blockhash
         let recent_blockhash = self.rpc_client.get_latest_blockhash().unwrap();
-        transaction.sign(&[&payer], recent_blockhash);
+        transaction.sign(&[&self.authority_key], recent_blockhash);
 
         // Send the transaction
         let signature = self
@@ -82,18 +103,10 @@ impl ContractClient for Client {
     fn load_unfinished_withdrawals(
         &self,
     ) -> Result<Vec<(Self::TxID, Self::Address, Self::Amount)>, Self::Error> {
-        let payer = if let Some(payer) = &self.payer {
-            payer
-        } else {
-            return Err(Error::MissingPayer);
-        };
-        // Token account you want to track the transfer history of
-        let token_account_pubkey = payer.pubkey();
-
         // Fetch signatures of transactions involving this token account
         let signatures = self
             .rpc_client
-            .get_signatures_for_address(&token_account_pubkey)
+            .get_signatures_for_address(&self.authority_key.pubkey())
             .unwrap();
 
         let mut withdrawals = vec![];
@@ -145,15 +158,5 @@ impl ContractClient for Client {
 
         // TODO all withdrawals are enumerated, we should check and return the untracked records only
         Ok(withdrawals)
-    }
-}
-
-impl Client {
-    pub fn get_height(&self) -> Result<u64, Error> {
-        if let Ok(height) = self.rpc_client.get_block_height() {
-            Ok(height)
-        } else {
-            Err(Error::RpcError)
-        }
     }
 }

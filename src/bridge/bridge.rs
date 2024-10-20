@@ -15,7 +15,7 @@ use crate::depc::{
     Client as DePCClient, TxID as DePCTxID,
 };
 
-pub trait ContractClient {
+pub trait TokenClient {
     type Error: std::fmt::Display;
     type Address: Into<String> + From<String> + Clone + Send;
     type Amount: Into<u64> + From<u64> + Clone + Send;
@@ -47,7 +47,7 @@ pub struct DepositInfo<Address, Amount> {
 
 pub struct Bridge<C>
 where
-    C: ContractClient,
+    C: TokenClient,
 {
     exit_sig: Arc<Mutex<bool>>,
     conn: db::Conn,
@@ -62,7 +62,7 @@ where
 
 impl<C> Bridge<C>
 where
-    C: ContractClient + Clone + 'static + Send,
+    C: TokenClient + Clone + 'static + Send,
 {
     pub fn new(
         conn: db::Conn,
@@ -153,7 +153,7 @@ pub async fn deposit_making<C>(
     conn: db::Conn,
 ) -> Result<()>
 where
-    C: ContractClient,
+    C: TokenClient,
 {
     loop {
         {
@@ -193,7 +193,7 @@ pub async fn run_depc_syncing<C>(
     tx_deposit: Sender<DepositInfo<C::Address, C::Amount>>,
 ) -> Result<()>
 where
-    C: ContractClient,
+    C: TokenClient,
 {
     let mut sync_height = if let Some(height) = conn.query_best_height() {
         height + 1
@@ -297,7 +297,7 @@ pub async fn run_sol_syncing<C>(
     conn: db::Conn,
 ) -> Result<()>
 where
-    C: ContractClient,
+    C: TokenClient,
 {
     loop {
         {
