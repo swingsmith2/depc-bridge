@@ -140,17 +140,31 @@ impl Deploy {
 
 #[cfg(test)]
 mod tests {
+    use crate::solana::{airdrop_maker::AirdropMaker, ChainQuerier};
+
     use super::*;
 
     #[test]
     fn test_deploy() {
+        let authority_key = Keypair::new();
+        let airdrop_maker = Builder::new()
+            .set_url_localhost()
+            .set_target_pubkey(authority_key.pubkey())
+            .build::<AirdropMaker>()
+            .unwrap();
+        let signature = airdrop_maker.airdrop(1_000_000_000).unwrap();
+        let chain_querier = Builder::new()
+            .set_url_localhost()
+            .build::<ChainQuerier>()
+            .unwrap();
+        chain_querier.wait_tx(signature).unwrap();
         let deploy = Builder::new()
             .set_url_localhost()
             .set_random_mint_key()
-            .set_random_authority_key()
+            .set_authority_key(authority_key)
             .build::<Deploy>()
             .unwrap();
         let signature = deploy.deploy().unwrap();
-        println!("signature: {}", signature);
+        println!("signature for deploy: {}", signature);
     }
 }
