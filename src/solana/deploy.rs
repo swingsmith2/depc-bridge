@@ -22,7 +22,7 @@ impl NewFromBuilder for Deploy {
     type T = Deploy;
 
     fn new_from_builder(builder: Builder) -> Result<Self::T, Error> {
-        let rpc_client = builder.new_rpc_client()?;
+        let rpc_client = builder.create_rpc_client_from_url()?;
         if builder.authority_key.is_none() {
             return Err(Error::MissingRequiredField);
         }

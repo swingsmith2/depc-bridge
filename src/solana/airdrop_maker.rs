@@ -12,7 +12,7 @@ impl NewFromBuilder for AirdropMaker {
     type T = AirdropMaker;
 
     fn new_from_builder(builder: Builder) -> Result<Self::T, super::Error> {
-        let rpc_client = builder.new_rpc_client()?;
+        let rpc_client = builder.create_rpc_client_from_url()?;
         if builder.target_pubkey.is_none() {
             return Err(Error::MissingRequiredField);
         }

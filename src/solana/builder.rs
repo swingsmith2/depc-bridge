@@ -34,7 +34,7 @@ impl Builder {
         T::new_from_builder(self)
     }
 
-    pub fn new_rpc_client(&self) -> Result<RpcClient, Error> {
+    pub fn create_rpc_client_from_url(&self) -> Result<RpcClient, Error> {
         if self.url.is_none() {
             return Err(Error::MissingRequiredField);
         }
