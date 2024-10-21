@@ -1,6 +1,7 @@
 #[derive(Debug)]
 pub enum Error {
     MissingRequiredField,
+    ExtractMismatchedType,
     CannotCreateMintInstructions,
     CannotGetLatestBlockHash,
     CannotGetBlockHeight,
@@ -10,6 +11,7 @@ pub enum Error {
     CannotGetAccountBalance,
     CannotUnpackAccountData,
     CannotGetStatusForSignature,
+    CannotGetTransactionInfo,
 }
 
 impl std::fmt::Display for Error {
