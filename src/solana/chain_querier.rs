@@ -1,5 +1,8 @@
+use std::thread::sleep;
+use std::time::Duration;
+
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature};
 
 use super::{Builder, Error, NewFromBuilder};
 
@@ -33,6 +36,39 @@ impl ChainQuerier {
         }
         let balance = res.unwrap();
         Ok(balance)
+    }
+
+    pub fn wait_tx(&self, signature: Signature) -> Result<(), Error> {
+        loop {
+            let res = match self
+                .rpc_client
+                .get_signature_status_with_commitment(&signature, CommitmentConfig::confirmed())
+            {
+                Ok(s) => {
+                    if s.is_some() {
+                        // ok, the tx is processed
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                }
+                Err(e) => {
+                    println!("cannot get status for signature, reason: {}", e);
+                    return Err(Error::CannotGetStatusForSignature);
+                }
+            };
+            if res.is_ok() {
+                let succ = res.unwrap();
+                if succ {
+                    break;
+                } else {
+                    sleep(Duration::from_secs(1));
+                }
+            } else {
+                return res.expect_err("this should be an error");
+            }
+        }
+        Ok(())
     }
 }
 

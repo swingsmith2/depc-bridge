@@ -45,13 +45,17 @@ mod tests {
     #[test]
     fn test_airdrop() {
         const AIRDROP_AMOUNT: u64 = 1_000_000_000;
+        let airdrop_pubkey =
+            Pubkey::from_str("CF2XGuxaYcmg5Li8pYUdd9C1UtGe9amSG3TVM2A1PuXR").unwrap();
         let chain_querier = Builder::new()
             .set_url_localhost()
             .build::<ChainQuerier>()
             .unwrap();
-        let airdrop_pubkey =
-            Pubkey::from_str("CF2XGuxaYcmg5Li8pYUdd9C1UtGe9amSG3TVM2A1PuXR").unwrap();
-        println!("aidrop to public-key: {}", airdrop_pubkey);
+        let balance_before_airdrop = chain_querier.get_balance(&airdrop_pubkey).unwrap();
+        println!(
+            "aidrop to public-key: {}, current balance: {}",
+            airdrop_pubkey, balance_before_airdrop
+        );
         let airdrop_maker = Builder::new()
             .set_url_localhost()
             .set_target_pubkey(airdrop_pubkey)
@@ -59,9 +63,10 @@ mod tests {
             .unwrap();
         let signature = airdrop_maker.airdrop(AIRDROP_AMOUNT).unwrap();
         println!("airdrop signature: {}", signature);
-
+        // wait until the tx is on-chain
+        chain_querier.wait_tx(signature).unwrap();
         // check balance
         let balance = chain_querier.get_balance(&airdrop_pubkey).unwrap();
-        assert!(balance > AIRDROP_AMOUNT);
+        assert_eq!(balance, balance_before_airdrop + AIRDROP_AMOUNT);
     }
 }

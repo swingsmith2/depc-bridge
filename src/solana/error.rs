@@ -9,6 +9,7 @@ pub enum Error {
     CannotGetAccountData,
     CannotGetAccountBalance,
     CannotUnpackAccountData,
+    CannotGetStatusForSignature,
 }
 
 impl std::fmt::Display for Error {
