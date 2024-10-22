@@ -230,3 +230,54 @@ fn parse_instruction(
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::solana::{airdrop_maker::AirdropMaker, Builder, ChainQuerier, Deploy, Querier};
+
+    use super::*;
+
+    #[test]
+    fn test_parse_spl_token_signature() {
+        let chain_querier = Builder::new()
+            .set_url_localhost()
+            .build::<ChainQuerier>()
+            .unwrap();
+
+        let authority_key = Keypair::new();
+        let mint_key = Keypair::new();
+
+        // airdrop
+        let airdrop = Builder::new()
+            .set_url_localhost()
+            .set_target_pubkey(authority_key.pubkey())
+            .build::<AirdropMaker>()
+            .unwrap();
+        let signature = airdrop.airdrop(1_000_000_000).unwrap();
+        chain_querier.wait_tx(signature).unwrap();
+
+        // deploy spl-token
+        let deploy = Builder::new()
+            .set_url_localhost()
+            .set_authority_key(authority_key)
+            .set_mint_key(mint_key.insecure_clone())
+            .build::<Deploy>()
+            .unwrap();
+        let signature = deploy.deploy().unwrap();
+        chain_querier.wait_tx(signature).unwrap();
+
+        // mint 1,000 to a new key
+        let holder = Keypair::new();
+        let signature = deploy.mint_to(&holder.pubkey(), 1_000).unwrap();
+        chain_querier.wait_tx(signature).unwrap();
+
+        // check the balance of the `holder` from spl-token
+        let token_querier = Builder::new()
+            .set_url_localhost()
+            .set_mint_pubkey(mint_key.pubkey())
+            .build::<Querier>()
+            .unwrap();
+        let balance = token_querier.get_token_balance(&holder.pubkey()).unwrap();
+        assert_eq!(balance, 1_000);
+    }
+}

@@ -92,9 +92,9 @@ impl Deploy {
         Ok(signature)
     }
 
-    pub fn mint_to(&self, recipient: Pubkey, amount: u64) -> Result<Signature, Error> {
+    pub fn mint_to(&self, recipient: &Pubkey, amount: u64) -> Result<Signature, Error> {
         // Get the recipient's associated token account (ATA)
-        let recipient_ata = get_associated_token_address(&recipient, &self.mint_key.pubkey());
+        let recipient_ata = get_associated_token_address(recipient, &self.mint_key.pubkey());
 
         // Create the recipient's ATA if it doesn't exist
         let create_ata_ix =

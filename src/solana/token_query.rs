@@ -5,7 +5,7 @@ use spl_token::state::Account as TokenAccount;
 
 use super::{Builder, Error, NewFromBuilder};
 
-struct Querier {
+pub struct Querier {
     rpc_client: RpcClient,
     mint_pubkey: Pubkey,
 }
