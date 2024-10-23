@@ -8,7 +8,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    system_instruction, system_program,
+    system_instruction,
     transaction::Transaction,
 };
 use solana_transaction_status::{
