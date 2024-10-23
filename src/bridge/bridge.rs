@@ -1,9 +1,11 @@
+use std::fmt::Debug;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{error, info};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
@@ -16,10 +18,10 @@ use crate::depc::{
 };
 
 pub trait TokenClient {
-    type Error: std::fmt::Display;
-    type Address: Into<String> + From<String> + Clone + Send;
+    type Error: std::fmt::Display + std::fmt::Debug;
+    type Address: ToString + FromStr + Clone + Send;
     type Amount: Into<u64> + From<u64> + Clone + Send;
-    type TxID: Into<String> + From<String> + Clone + Send;
+    type TxID: ToString + FromStr + Clone + Send;
 
     fn send(
         &self,
@@ -170,7 +172,7 @@ where
             ) {
                 Ok(txid) => {
                     // update database
-                    conn.confirm_deposit(&(txid).into(), get_curr_timestamp(), "")?;
+                    conn.confirm_deposit(&txid.to_string(), get_curr_timestamp(), "")?;
                 }
                 Err(e) => {
                     error!(
@@ -270,12 +272,17 @@ where
                     let to_erc20_address_str = deposit_info.unwrap();
                     conn.make_deposit(txid, &to_erc20_address_str, amount, block.time)
                         .unwrap();
-                    // we need to put this deposit to the consumer thread to make it happend on
-                    // solana network
+                    let sender_address = C::Address::from_str("TODO the sender address should be retrieved from config or command-line arguments").unwrap_or_else(|_| {
+                        panic!("invalid address");
+                    });
+                    let recipient_address = C::Address::from_str(&to_erc20_address_str)
+                        .unwrap_or_else(|_| {
+                            panic!("invalid address");
+                        });
                     tx_deposit
-                        .send(DepositInfo {
-                            sender_address: "TODO the sender address should be retrieved from config or command-line arguments".to_owned().into(),
-                            recipient_address: to_erc20_address_str.into(),
+                        .send(DepositInfo::<C::Address, C::Amount> {
+                            sender_address,
+                            recipient_address,
                             amount: amount.into(),
                         })
                         .await
@@ -315,9 +322,9 @@ where
                             .as_secs();
                         // we need to save the withdrawal into database
                         conn.make_withdraw(
-                            &(txid.clone()).into(),
+                            &txid.to_string(),
                             timestamp,
-                            &(address.clone()).into(),
+                            &address.to_string(),
                             (amount.clone()).into(),
                         )
                         .unwrap();

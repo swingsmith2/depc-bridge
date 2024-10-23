@@ -12,6 +12,9 @@ pub enum Error {
     CannotUnpackAccountData,
     CannotGetStatusForSignature,
     CannotGetTransactionInfo,
+    CannotParsePubkeyFromString,
+    CannotGetAssociatedAccount,
+    CannotCreateAssociatedAccount,
 }
 
 impl std::fmt::Display for Error {
