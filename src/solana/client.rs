@@ -1,16 +1,12 @@
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
+    commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
 };
-use spl_token::instruction::transfer;
 
-use crate::{
-    bridge::TokenClient,
-    solana::{get_or_create_associated_token_account, wait_transaction_until_processed},
-};
+use crate::bridge::TokenClient;
 
 use super::{inspect_transaction, send_token, Error};
 
@@ -18,6 +14,17 @@ pub struct SolanaClient {
     rpc_client: RpcClient,
     authority_key: Keypair,
     mint_pubkey: Pubkey,
+}
+
+impl SolanaClient {
+    pub fn new(endpoint: &str, mint_pubkey: Pubkey, authority_key: Keypair) -> SolanaClient {
+        let rpc_client = RpcClient::new_with_commitment(endpoint, CommitmentConfig::confirmed());
+        SolanaClient {
+            rpc_client,
+            authority_key,
+            mint_pubkey,
+        }
+    }
 }
 
 impl TokenClient for SolanaClient {
@@ -44,12 +51,11 @@ impl TokenClient for SolanaClient {
     fn load_unfinished_withdrawals(
         &self,
     ) -> Result<Vec<(Self::TxID, Self::Address, Self::Amount)>, Self::Error> {
-        // Fetch signatures of transactions involving this token account
+        // fetch signatures of transactions involving this token account
         let signatures = self
             .rpc_client
             .get_signatures_for_address(&self.authority_key.pubkey())
             .unwrap();
-
         let mut withdrawals = vec![];
 
         for signature_info in signatures.iter() {
@@ -64,7 +70,6 @@ impl TokenClient for SolanaClient {
             }
         }
 
-        // TODO all withdrawals are enumerated, we should check and return the untracked records only
         Ok(withdrawals)
     }
 }
