@@ -12,7 +12,7 @@ use crate::{
     solana::{get_or_create_associated_token_account, wait_transaction_until_processed},
 };
 
-use super::{inspect_transaction, Error};
+use super::{inspect_transaction, send_token, Error};
 
 pub struct SolanaClient {
     rpc_client: RpcClient,
@@ -28,65 +28,16 @@ impl TokenClient for SolanaClient {
 
     fn send(
         &self,
-        sender_address: Self::Address,
-        recipient_address: Self::Address,
+        recipient_address: &Self::Address,
         amount: Self::Amount,
     ) -> Result<Self::TxID, Self::Error> {
-        // we need to retrieve the associated token address
-        let res = get_or_create_associated_token_account(
+        let signature = send_token(
             &self.rpc_client,
             &self.mint_pubkey,
             &self.authority_key,
-        );
-        if res.is_err() {
-            return Err(Error::CannotGetAssociatedAccount);
-        }
-        let (sender, signature_opt) = res.unwrap();
-        println!("got sender ({}) token address: {}", sender_address, sender);
-        if let Some(signature) = signature_opt {
-            wait_transaction_until_processed(&self.rpc_client, &signature).unwrap();
-        }
-        let res = get_or_create_associated_token_account(
-            &self.rpc_client,
-            &self.mint_pubkey,
-            &self.authority_key,
-        );
-        if res.is_err() {
-            return Err(Error::CannotGetAssociatedAccount);
-        }
-        let (recipient, signature_opt) = res.unwrap();
-        println!(
-            "got recipient ({}) token address: {}",
-            recipient_address, recipient
-        );
-        if let Some(signature) = signature_opt {
-            wait_transaction_until_processed(&self.rpc_client, &signature).unwrap();
-        }
-        // Create the SPL token transfer instruction
-        let authority_pubkey = self.authority_key.pubkey();
-        let transfer_instruction = transfer(
-            &spl_token::id(),
-            &sender,
-            &recipient,
-            &authority_pubkey,
-            &[],
+            recipient_address,
             amount,
-        )
-        .unwrap();
-
-        // Create a new transaction
-        let mut transaction =
-            Transaction::new_with_payer(&[transfer_instruction], Some(&authority_pubkey));
-
-        // Get recent blockhash
-        let recent_blockhash = self.rpc_client.get_latest_blockhash().unwrap();
-        transaction.sign(&[&self.authority_key], recent_blockhash);
-
-        // Send the transaction
-        let signature = self
-            .rpc_client
-            .send_and_confirm_transaction(&transaction)
-            .unwrap();
+        )?;
         Ok(signature)
     }
 

@@ -25,8 +25,7 @@ pub trait TokenClient {
 
     fn send(
         &self,
-        sender_address: Self::Address,
-        recipient_address: Self::Address,
+        recipient_address: &Self::Address,
         amount: Self::Amount,
     ) -> Result<Self::TxID, Self::Error>;
 
@@ -165,11 +164,7 @@ where
             }
         }
         if let Some(deposit) = rx_deposit.recv().await {
-            match contract_client.send(
-                deposit.sender_address,
-                deposit.recipient_address,
-                deposit.amount,
-            ) {
+            match contract_client.send(&deposit.recipient_address, deposit.amount) {
                 Ok(txid) => {
                     // update database
                     conn.confirm_deposit(&txid.to_string(), get_curr_timestamp(), "")?;
