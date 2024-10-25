@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use solana_client::rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient};
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -13,10 +15,11 @@ use crate::{bridge::TokenClient, solana::parse_transaction};
 
 use super::{send_token, Error};
 
+#[derive(Clone)]
 pub struct SolanaClient {
-    rpc_client: RpcClient,
+    rpc_client: Arc<RpcClient>,
     commitment_config: CommitmentConfig,
-    authority_key: Keypair,
+    authority_key: Arc<Keypair>,
     mint_pubkey: Pubkey,
 }
 
@@ -27,11 +30,11 @@ impl SolanaClient {
         authority_key: Keypair,
         commitment_config: CommitmentConfig,
     ) -> SolanaClient {
-        let rpc_client = RpcClient::new_with_commitment(endpoint, CommitmentConfig::confirmed());
+        let rpc_client = RpcClient::new_with_commitment(endpoint, commitment_config);
         SolanaClient {
-            rpc_client,
+            rpc_client: Arc::new(rpc_client),
             commitment_config,
-            authority_key,
+            authority_key: Arc::new(authority_key),
             mint_pubkey,
         }
     }

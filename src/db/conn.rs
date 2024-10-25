@@ -181,7 +181,7 @@ impl Conn {
         Ok(())
     }
 
-    pub fn make_deposit(
+    pub fn save_deposit(
         &self,
         depc_txid: &str,
         to_address_erc20: &str,
@@ -363,7 +363,7 @@ mod tests {
         let conn = Conn::open_in_mem().unwrap();
         conn.init().unwrap();
 
-        conn.make_deposit("depc_txid", "to_erc20_address", 10000000, 394838121)
+        conn.save_deposit("depc_txid", "to_erc20_address", 10000000, 394838121)
             .unwrap();
 
         conn.confirm_deposit("erc20_txid", 193847845, "depc_txid")

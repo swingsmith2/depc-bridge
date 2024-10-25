@@ -11,14 +11,20 @@ mod cmds;
 
 mod rest;
 
-use std::sync::{Arc, Mutex};
+use std::{
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Result;
+use bridge::Bridge;
 use clap::Parser;
 use log::{debug, info};
 use rest::run_service;
 
 use args::{Args, Commands};
+use solana::SolanaClient;
+use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Keypair};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -60,15 +66,31 @@ async fn main() -> Result<()> {
 
             let exit_sig = Arc::new(Mutex::new(false));
 
-            // TODO create bridge here
+            // create bridge here
+            let sol_mint_pubkey = Pubkey::from_str(&args.sol_mint_pubkey).unwrap();
+            let sol_authority_key = Keypair::from_base58_string(&args.sol_authority_key);
+            let contract_client = SolanaClient::new(
+                &args.sol_endpoint,
+                sol_mint_pubkey,
+                sol_authority_key,
+                CommitmentConfig::confirmed(),
+            );
+            let bridge = Bridge::<SolanaClient>::new(
+                conn.clone(),
+                client,
+                "TODO depc owner address".to_owned(),
+                contract_client,
+            );
+            let bridge_handler = bridge.run();
 
             // running webservice
             run_service(&args.bind, conn, exit_sig).await;
+            bridge_handler.await?;
 
             info!("exit.");
             Ok(())
         }
-        Commands::Deploy(deploy) => {
+        Commands::Deploy(_) => {
             todo!("complete this command")
         }
     }

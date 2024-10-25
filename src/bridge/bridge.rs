@@ -1,11 +1,10 @@
-use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{error, info};
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
@@ -64,7 +63,7 @@ where
 
 impl<C> Bridge<C>
 where
-    C: TokenClient + Clone + 'static + Send,
+    C: TokenClient + 'static + Send + Clone,
 {
     pub fn new(
         conn: db::Conn,
@@ -117,7 +116,7 @@ where
 
         let sol_syncing_task = tokio::spawn(run_sol_syncing::<C>(
             Arc::clone(&self.exit_sig),
-            self.contract_client,
+            self.contract_client.clone(),
             self.conn,
         ));
         tasks.push(sol_syncing_task);
@@ -185,7 +184,7 @@ where
 
 pub async fn run_depc_syncing<C>(
     exit_sig: Arc<Mutex<bool>>,
-    conn: db::Conn,
+    local_db: db::Conn,
     depc_client: DePCClient,
     depc_owner_address: DePCAddress,
     tx_deposit: Sender<DepositInfo<C::Address, C::Amount>>,
@@ -193,12 +192,12 @@ pub async fn run_depc_syncing<C>(
 where
     C: TokenClient,
 {
-    let mut sync_height = if let Some(height) = conn.query_best_height() {
+    let mut sync_height = if let Some(height) = local_db.query_best_height() {
         height + 1
     } else {
         0
     };
-    conn.begin_transaction()?;
+    local_db.begin_transaction()?;
 
     loop {
         {
@@ -222,7 +221,7 @@ where
         let block_hash = depc_client.get_block_hash(sync_height)?;
         let block = depc_client.get_block(&block_hash)?;
         assert_eq!(block.height, sync_height);
-        conn.add_block(&block.hash, sync_height, &block.miner, block.time)?;
+        local_db.add_block(&block.hash, sync_height, &block.miner, block.time)?;
 
         if sync_height > 0 {
             // transactions
@@ -230,11 +229,11 @@ where
                 let transaction = depc_client.get_transaction(txid)?;
                 let mut deposit_info = None;
                 assert_eq!(transaction.txid, *txid);
-                conn.add_transaction(&block_hash, txid)?;
+                local_db.add_transaction(&block_hash, txid)?;
                 for txin in transaction.vin.iter() {
                     if !txin.is_coinbase() {
                         // TODO maybe we need to check the validity of the txin?
-                        conn.mark_coin_to_spent(
+                        local_db.mark_coin_to_spent(
                             &txin.txid.clone().unwrap(),
                             txin.vout.unwrap(),
                             txid,
@@ -246,7 +245,7 @@ where
                 for txout in transaction.vout.iter() {
                     // save the txout anyway
                     if let Some(address) = txout.get_address() {
-                        conn.add_coin(
+                        local_db.add_coin(
                             txid,
                             txout.n,
                             txout.value64,
@@ -266,7 +265,8 @@ where
                 }
                 if deposit_info.is_some() && amount > 0 {
                     let to_erc20_address_str = deposit_info.unwrap();
-                    conn.make_deposit(txid, &to_erc20_address_str, amount, block.time)
+                    local_db
+                        .save_deposit(txid, &to_erc20_address_str, amount, block.time)
                         .unwrap();
                     let sender_address = C::Address::from_str("TODO the sender address should be retrieved from config or command-line arguments").unwrap_or_else(|_| {
                         panic!("invalid address");
@@ -289,7 +289,7 @@ where
 
         sync_height += 1;
     }
-    conn.commit_transaction()?;
+    local_db.commit_transaction()?;
 
     Ok(())
 }

@@ -23,6 +23,15 @@ pub struct Run {
     /// Use proxy for the connection of RPC
     #[arg(long, default_value_t = false)]
     pub depc_rpc_use_proxy: bool,
+    /// The endpoint string should be used for establishing connection to solana node
+    #[arg(long, default_value = "https://api.devnet.solana.com")]
+    pub sol_endpoint: String,
+    /// The authority private key for manipulate spl-token from sonala network
+    #[arg(long)]
+    pub sol_authority_key: String,
+    /// The mint address of the spl-token
+    #[arg(long)]
+    pub sol_mint_pubkey: String,
     /// The path string to local database
     #[arg(long, default_value = "$HOME/depc-bridge.sqlite3")]
     pub local_db: String,
