@@ -80,7 +80,7 @@ impl TokenClient for SolanaClient {
 
     fn load_unfinished_withdrawals(
         &self,
-        from_height: u64,
+        after: Option<Signature>,
     ) -> Result<Vec<(Self::TxID, Self::Address, Self::Amount)>, Self::Error> {
         let token_pubkey =
             get_associated_token_address(&self.authority_key.pubkey(), &self.mint_pubkey);
@@ -91,7 +91,7 @@ impl TokenClient for SolanaClient {
                 &token_pubkey,
                 GetConfirmedSignaturesForAddress2Config {
                     before: None,
-                    until: None,
+                    until: after,
                     limit: None,
                     commitment: Some(self.commitment_config),
                 },
@@ -221,7 +221,7 @@ mod tests {
         let balance = get_token_balance(&rpc_client, &mint_pubkey, &target_pubkey).unwrap();
         assert!(balance >= TRANSFER_LAMPORTS);
 
-        let withdrawals = client.load_unfinished_withdrawals(0).unwrap();
+        let withdrawals = client.load_unfinished_withdrawals(None).unwrap();
         println!("total {} withdrawal(s)", withdrawals.len());
         assert!(withdrawals.len() > 0);
         for (signature, pubkey, amount) in withdrawals.iter() {
