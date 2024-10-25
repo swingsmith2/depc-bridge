@@ -31,6 +31,7 @@ pub trait TokenClient {
 
     fn load_unfinished_withdrawals(
         &self,
+        from_height: u64,
     ) -> Result<Vec<(Self::TxID, Self::Address, Self::Amount)>, Self::Error>;
 }
 
@@ -307,7 +308,7 @@ where
             if *exit {
                 break;
             }
-            match contract_client.load_unfinished_withdrawals() {
+            match contract_client.load_unfinished_withdrawals(0) {
                 Ok(withdrawals) => {
                     for (txid, address, amount) in withdrawals.iter() {
                         // current timestamp we should retrieve

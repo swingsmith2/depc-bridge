@@ -3,6 +3,7 @@ use std::{thread::sleep, time::Duration};
 use serde_json::Value;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
+    account::ReadableAccount,
     commitment_config::CommitmentConfig,
     program_pack::Pack,
     pubkey::Pubkey,
@@ -13,7 +14,7 @@ use solana_sdk::{
 };
 use solana_transaction_status::{
     parse_instruction::ParsedInstruction, EncodedTransaction, UiInstruction, UiMessage,
-    UiParsedInstruction, UiParsedMessage, UiTransaction, UiTransactionEncoding,
+    UiParsedInstruction, UiTransaction, UiTransactionEncoding,
 };
 use spl_associated_token_account::{
     get_associated_token_address, instruction::create_associated_token_account,
@@ -23,10 +24,22 @@ use spl_token::{
     state::{Account as TokenAccount, Mint},
 };
 
-use super::{Error, InstructionInfo, TransactionInfo};
+use super::Error;
 
-pub const DEFAULT_LOCAL_ENDPOINT: &str = "http://127.0.0.1:8899";
-pub const DEFAULT_MINT_AMOUNT: u64 = 83_000_000 * 10 ^ 8;
+pub const DEFAULT_LOCAL_ENDPOINT: &str = "https://api.devnet.solana.com";
+pub const DEFAULT_MINT_AMOUNT: u64 = 83_000_000 * 10u64.pow(8);
+
+pub fn check_spl_token(rpc_client: &RpcClient, mint_pubkey: &Pubkey) -> Result<u64, Error> {
+    let res = rpc_client.get_account(&mint_pubkey);
+    if let Err(e) = res {
+        return Err(Error::InvalidMintAddress(mint_pubkey.to_string()));
+    }
+    let account = res.unwrap();
+    if let Ok(mint) = Mint::unpack(account.data()) {
+        return Ok(mint.supply);
+    }
+    Err(Error::InvalidMintAddress(mint_pubkey.to_string()))
+}
 
 pub fn init_spl_token(
     rpc_client: &RpcClient,
@@ -115,14 +128,14 @@ pub fn get_token_balance(
     let res = rpc_client.get_account_data(&associated_token_address);
     if res.is_err() {
         println!("get account data is failed, reason: {}", res.err().unwrap());
-        return Err(Error::CannotGetAccountData);
+        return Err(Error::CannotGetAccountData(mint_pubkey.to_string()));
     }
     let account_data = res.unwrap();
 
     // Deserialize the token account data
     let res = TokenAccount::unpack(&account_data);
     if res.is_err() {
-        return Err(Error::CannotUnpackAccountData);
+        return Err(Error::CannotUnpackAccountData(mint_pubkey.to_string()));
     }
     let token_account = res.unwrap();
     Ok(token_account.amount)
@@ -131,12 +144,11 @@ pub fn get_token_balance(
 pub fn wait_transaction_until_processed(
     rpc_client: &RpcClient,
     signature: &Signature,
+    commitment: CommitmentConfig,
 ) -> Result<(), Error> {
     println!("waiting signature {}...", signature);
     loop {
-        let res = match rpc_client
-            .get_signature_status_with_commitment(&signature, CommitmentConfig::confirmed())
-        {
+        let res = match rpc_client.get_signature_status_with_commitment(&signature, commitment) {
             Ok(s) => {
                 if s.is_some() {
                     // ok, the tx is processed
@@ -148,7 +160,7 @@ pub fn wait_transaction_until_processed(
             }
             Err(e) => {
                 println!("cannot get status for signature, reason: {}", e);
-                return Err(Error::CannotGetStatusForSignature);
+                return Err(Error::CannotGetStatusForSignature(signature.to_string()));
             }
         };
         if res.is_ok() {
@@ -163,27 +175,6 @@ pub fn wait_transaction_until_processed(
         }
     }
     Ok(())
-}
-
-pub fn inspect_transaction(
-    rpc_client: &RpcClient,
-    signature: Signature,
-) -> Result<Vec<TransactionInfo>, Error> {
-    let res = rpc_client.get_transaction(&signature, UiTransactionEncoding::Json);
-    if res.is_err() {
-        return Err(Error::CannotGetTransactionInfo);
-    }
-    let json = res.unwrap();
-    let mut transactions = vec![];
-    if let EncodedTransaction::Json(transaction) = json.transaction.transaction {
-        let instructions = parsing::parse_spl_token_instruction(&transaction)?;
-        for instruction in instructions.iter() {
-            if let Some(transaction_info) = parsing::parse_instruction(signature, *instruction)? {
-                transactions.push(transaction_info);
-            }
-        }
-    }
-    Ok(transactions)
 }
 
 pub fn create_associated_token_account_and_send(
@@ -226,7 +217,9 @@ pub fn get_or_create_associated_token_account(
         // we need to create th token account
         let res = create_associated_token_account_and_send(rpc_client, mint_pubkey, owner_key);
         if res.is_err() {
-            return Err(Error::CannotCreateAssociatedAccount);
+            return Err(Error::CannotCreateAssociatedAccount(
+                owner_key.pubkey().to_string(),
+            ));
         }
         signature = Some(res.unwrap());
     }
@@ -276,12 +269,20 @@ pub fn send_token(
 mod parsing {
     use super::*;
 
-    pub(super) fn parse_ui_message(ui_message: &UiMessage) -> Result<&UiParsedMessage, Error> {
-        if let UiMessage::Parsed(message) = ui_message {
-            Ok(message)
-        } else {
-            Err(Error::ExtractMismatchedType)
+    pub(super) fn parse_ui_message(ui_message: &UiMessage) -> Result<Vec<UiInstruction>, Error> {
+        match ui_message {
+            UiMessage::Parsed(message) => Ok(message.instructions.clone()),
+            UiMessage::Raw(raw) => {
+                println!("it's UiRawMessage: {:?}", raw.instructions);
+                Err(Error::ExtractMismatchedType)
+            }
         }
+        // if let UiMessage::Parsed(message) = ui_message {
+        //     Ok(message)
+        // } else {
+        //     println!("cannot extract UiMessage");
+        //     Err(Error::ExtractMismatchedType)
+        // }
     }
 
     pub(super) fn parse_ui_instruction(
@@ -290,6 +291,7 @@ mod parsing {
         if let UiInstruction::Parsed(instruction) = ui_instruction {
             Ok(instruction)
         } else {
+            println!("cannot extract UiInstruction");
             Err(Error::ExtractMismatchedType)
         }
     }
@@ -300,59 +302,8 @@ mod parsing {
         if let UiParsedInstruction::Parsed(instruction) = instruction {
             Ok(instruction)
         } else {
+            println!("cannot extract UiParsedInstruction");
             Err(Error::ExtractMismatchedType)
-        }
-    }
-
-    pub(super) fn parse_spl_token_instruction(
-        transaction: &UiTransaction,
-    ) -> Result<Vec<&ParsedInstruction>, Error> {
-        let mut instructions = vec![];
-        let message = parse_ui_message(&transaction.message)?;
-        for instruction in message.instructions.iter() {
-            let instruction = parse_ui_instruction(instruction)?;
-            let instruction = parse_instruction_from_ui_parsed_instruction(instruction)?;
-            if instruction.program_id == spl_token::id().to_string() {
-                // ok, this is spl_token instruction
-                instructions.push(instruction);
-            }
-        }
-        Ok(instructions)
-    }
-
-    pub(super) fn parse_instruction_info(value: &Value) -> Result<InstructionInfo, Error> {
-        let amount: u64 = value["amount"].as_str().unwrap_or("0").parse().unwrap_or(0);
-        let authority = Pubkey::try_from(value["authority"].as_str().unwrap()).unwrap();
-        let destination = Pubkey::try_from(value["destination"].as_str().unwrap()).unwrap();
-        let source = Pubkey::try_from(value["source"].as_str().unwrap()).unwrap();
-        let owner = Pubkey::try_from(value["owner"].as_str().unwrap()).unwrap();
-        Ok(InstructionInfo {
-            amount,
-            authority,
-            destination,
-            source,
-            owner,
-        })
-    }
-
-    pub(super) fn parse_instruction(
-        signature: Signature,
-        parsed_instruction: &ParsedInstruction,
-    ) -> Result<Option<TransactionInfo>, Error> {
-        // Look for TokenInstruction::Transfer
-        if let Some("transfer") = parsed_instruction
-            .parsed
-            .get("type")
-            .and_then(|t| t.as_str())
-        {
-            let value = &parsed_instruction.parsed["info"];
-            let instruction = parse_instruction_info(value)?;
-            Ok(Some(TransactionInfo {
-                signature,
-                instruction,
-            }))
-        } else {
-            Ok(None)
         }
     }
 }
@@ -363,6 +314,8 @@ mod tests {
 
     use super::*;
 
+    const DEFAULT_AIRDROP_AMOUNT: u64 = 1_000_000_000;
+
     #[test]
     fn test_init_spl_token_and_mint_and_send() {
         let rpc_client =
@@ -372,9 +325,10 @@ mod tests {
         let mint_pubkey = mint_key.pubkey();
 
         let signature = rpc_client
-            .request_airdrop(&authority_key.pubkey(), 1_000_000_000)
+            .request_airdrop(&authority_key.pubkey(), DEFAULT_AIRDROP_AMOUNT)
             .unwrap();
-        wait_transaction_until_processed(&rpc_client, &signature).unwrap();
+        wait_transaction_until_processed(&rpc_client, &signature, CommitmentConfig::confirmed())
+            .unwrap();
 
         let signature = init_spl_token(
             &rpc_client,
@@ -384,7 +338,8 @@ mod tests {
             DEFAULT_MINT_AMOUNT,
         )
         .unwrap();
-        wait_transaction_until_processed(&rpc_client, &signature).unwrap();
+        wait_transaction_until_processed(&rpc_client, &signature, CommitmentConfig::confirmed())
+            .unwrap();
 
         // check the token balance of the mint account
         let balance =
@@ -397,13 +352,19 @@ mod tests {
 
         // don't forget the airdropping, else you don't have enough money to pay the fee
         let signature = rpc_client
-            .request_airdrop(&target_pubkey, 1_000_000_000)
+            .request_airdrop(&target_pubkey, DEFAULT_AIRDROP_AMOUNT)
             .unwrap();
-        wait_transaction_until_processed(&rpc_client, &signature).unwrap();
+        wait_transaction_until_processed(&rpc_client, &signature, CommitmentConfig::confirmed())
+            .unwrap();
 
         let (_, signature_opt) =
             get_or_create_associated_token_account(&rpc_client, &mint_pubkey, &target_key).unwrap();
-        wait_transaction_until_processed(&rpc_client, &signature_opt.unwrap()).unwrap();
+        wait_transaction_until_processed(
+            &rpc_client,
+            &signature_opt.unwrap(),
+            CommitmentConfig::confirmed(),
+        )
+        .unwrap();
 
         let signature = send_token(
             &rpc_client,
@@ -413,7 +374,8 @@ mod tests {
             100,
         )
         .unwrap();
-        wait_transaction_until_processed(&rpc_client, &signature).unwrap();
+        wait_transaction_until_processed(&rpc_client, &signature, CommitmentConfig::confirmed())
+            .unwrap();
 
         let balance = get_token_balance(&rpc_client, &mint_pubkey, &target_pubkey).unwrap();
         assert_eq!(balance, 100);

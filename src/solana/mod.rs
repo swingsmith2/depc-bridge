@@ -1,13 +1,13 @@
-mod transaction_info;
+mod transaction_parser;
 
 mod client;
-mod spl_token;
+mod token;
 
 mod error;
 
-pub use transaction_info::*;
+pub use transaction_parser::*;
 
 pub use client::*;
-pub use spl_token::*;
+pub use token::*;
 
 pub use error::*;
