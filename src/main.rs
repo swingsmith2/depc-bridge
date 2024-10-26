@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
             let bridge = Bridge::<SolanaClient>::new(
                 conn.clone(),
                 client,
-                "TODO depc owner address".to_owned(),
+                args.depc_owner_address,
                 contract_client,
             );
             let bridge_handler = bridge.run();
