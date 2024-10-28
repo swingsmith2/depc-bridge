@@ -22,16 +22,32 @@ pub trait TokenClient {
     type Amount: Into<u64> + From<u64> + Clone + Send;
     type TxID: ToString + FromStr + Clone + Send;
 
+    /// # Send spl-token to target account
+    ///
+    /// Arguments:
+    /// * recipient_address - The target account from spl-token
+    /// * amount - Total amount the authority needs to send
+    ///
+    /// Returns:
+    /// * The signature of the new transaction from solana network
+    /// * Otherwise the transaction cannot be made, check the error
     fn send(
         &self,
         recipient_address: &Self::Address,
         amount: Self::Amount,
     ) -> Result<Self::TxID, Self::Error>;
 
-    fn load_unfinished_withdrawals(
-        &self,
-        after: Option<Self::TxID>,
-    ) -> Result<Vec<(Self::TxID, Self::Address, Self::Amount)>, Self::Error>;
+    /// # Verify a transaction
+    /// After the authority receives a withdraw request from DePINC chain, we need
+    /// to verify the transaction from solana network also retrieve the number of amount
+    ///
+    /// Arguments:
+    /// * txid - The id of the transaction needs to be verified
+    ///
+    /// Returns:
+    /// * The amount needs to be transferred on DePINC chain
+    /// * Otherwise, the transaction from solana is invalid or it's not a related spl-token tx
+    fn verify(&self, txid: Self::TxID) -> Result<Self::Amount, Self::Error>;
 }
 
 pub struct WithdrawInfo {
