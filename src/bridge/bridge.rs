@@ -111,6 +111,7 @@ where
             self.depc_client,
             self.depc_owner_address,
             self.tx_deposit,
+            self.tx_withdraw,
         ));
         tasks.push(depc_syncing_task);
 
@@ -188,6 +189,7 @@ pub async fn run_depc_syncing<C>(
     depc_client: DePCClient,
     depc_owner_address: DePCAddress,
     tx_deposit: Sender<DepositInfo<C::Address, C::Amount>>,
+    tx_withdraw: Sender<WithdrawInfo>, // TODO matthew: deliver the withdrawal to this channel
 ) -> Result<()>
 where
     C: TokenClient,
@@ -228,6 +230,9 @@ where
             for txid in block.tx.iter() {
                 let transaction = depc_client.get_transaction(txid)?;
                 let mut deposit_info = None;
+                let mut withdraw_info: Option<WithdrawInfo> = None; // TODO matthew: withdrawal
+                                                                    // information should be
+                                                                    // extracted from txouts
                 assert_eq!(transaction.txid, *txid);
                 local_db.add_transaction(&block_hash, txid)?;
                 for txin in transaction.vin.iter() {
@@ -257,7 +262,8 @@ where
                             amount += txout.value64;
                         }
                     } else {
-                        // maybe it is the script with erc20 address
+                        // TODO matthew: the string from the script might contains both deposit and
+                        // withdrawal, they should be separated individually
                         if let Ok(str) = extract_string_from_script_hex(&txout.script_pubkey.hex) {
                             deposit_info = Some(str);
                         }

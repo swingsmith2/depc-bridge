@@ -69,6 +69,8 @@ impl Client {
     }
 
     pub fn transfer(&self, from_address: &Address, to_address: &Address, amount: Amount) -> Result<TxID, Error> {
+        // TODO matthew: start a new transaction to transfer the DePC to target address with
+        // correct amount
         todo!("complete this method")
     }
 }
