@@ -79,6 +79,7 @@ async fn main() -> Result<()> {
                 conn.clone(),
                 client,
                 args.depc_owner_address,
+                args.solana_owner_address,
                 contract_client,
             );
             let bridge_handler = bridge.run();

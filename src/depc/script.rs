@@ -1,6 +1,8 @@
-use super::Error;
+use super::{Address, Error};
+use crate::bridge::DepcScriptData;
+use log::error;
 
-pub fn extract_string_from_script_hex(hex_str: &str) -> Result<String, Error> {
+pub fn extract_string_from_script_hex(hex_str: &str) -> Result<DepcScriptData<Address>, Error> {
     let data = match hex::decode(hex_str) {
         Ok(r) => r,
         Err(_) => {
@@ -21,7 +23,7 @@ pub fn extract_string_from_script_hex(hex_str: &str) -> Result<String, Error> {
         return Err(Error::InvalidScript);
     }
 
-    Ok(decode_script_after_op_return(&data[6..])?.to_owned())
+    Ok(decode_script_after_op_return(&data[6..])?)
 }
 
 const OP_RETURN: u8 = 0x6au8;
@@ -29,7 +31,7 @@ const OP_PUSHDATA1: u8 = 0x4cu8;
 const OP_PUSHDATA2: u8 = 0x4du8;
 const OP_PUSHDATA4: u8 = 0x4eu8;
 
-fn decode_script_after_op_return(script: &[u8]) -> Result<&str, Error> {
+fn decode_script_after_op_return(script: &[u8]) -> Result<DepcScriptData<Address>, Error> {
     let opcode = *match script.get(0) {
         Some(c) => c,
         None => {
@@ -67,12 +69,19 @@ fn decode_script_after_op_return(script: &[u8]) -> Result<&str, Error> {
     // ensure the length of slice equals to the number of size which is calculated from above
     let slice = &script[start_index..];
     assert_eq!(slice.len(), size);
-    Ok(match std::str::from_utf8(&slice) {
-        Ok(s) => s,
-        Err(_) => {
-            return Err(Error::InvalidStringFromScript);
-        }
-    })
+    // Ok(match std::str::from_utf8(&slice) {
+    //     Ok(s) => s,
+    //     Err(_) => {
+    //         return Err(Error::InvalidStringFromScript);
+    //     }
+    // })
+    let script: DepcScriptData<Address>;
+
+    script = DepcScriptData {
+        recipient: "".parse().unwrap(),
+        signature: "".parse().unwrap(),
+    };
+    Ok(script)
 }
 
 #[cfg(test)]

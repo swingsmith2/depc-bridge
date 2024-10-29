@@ -16,6 +16,8 @@ pub enum Error {
     CannotParsePubkeyFromString(String),
     CannotGetAssociatedAccount(String),
     CannotCreateAssociatedAccount(String),
+    InvalidTransaction(String),
+    CannotFetchTransaction(String),
 }
 
 impl std::fmt::Display for Error {
@@ -37,6 +39,8 @@ impl std::fmt::Display for Error {
             Self::CannotParsePubkeyFromString(pubkey) => write!(f, "cannot parse public-key from string: {}", pubkey),
             Self::CannotGetAssociatedAccount(pubkey) => write!(f, "cannot get associated account: {}", pubkey),
             Self::CannotCreateAssociatedAccount(pubkey) => write!(f, "cannot create associated account: {}", pubkey),
+            Self::InvalidTransaction(signature) => write!(f, "invalid transaction: {}",signature),
+            Self::CannotFetchTransaction(signature) => write!(f, "cannot fetch transaction: {}", signature),
         }
     }
 }

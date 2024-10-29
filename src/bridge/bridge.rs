@@ -5,61 +5,31 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use log::{error, info};
 
 use anyhow::Result;
+use solana_sdk::signature::Signature;
 use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
 
 use crate::db;
-use crate::depc::{
-    extract_string_from_script_hex, Address as DePCAddress, Amount as DePCAmount,
-    Client as DePCClient, TxID as DePCTxID,
-};
-
-pub trait TokenClient {
-    type Error: std::fmt::Display + std::fmt::Debug;
-    type Address: ToString + FromStr + Clone + Send;
-    type Amount: Into<u64> + From<u64> + Clone + Send;
-    type TxID: ToString + FromStr + Clone + Send;
-
-    /// # Send spl-token to target account
-    ///
-    /// Arguments:
-    /// * recipient_address - The target account from spl-token
-    /// * amount - Total amount the authority needs to send
-    ///
-    /// Returns:
-    /// * The signature of the new transaction from solana network
-    /// * Otherwise the transaction cannot be made, check the error
-    fn send(
-        &self,
-        recipient_address: &Self::Address,
-        amount: Self::Amount,
-    ) -> Result<Self::TxID, Self::Error>;
-
-    /// # Verify a transaction
-    /// After the authority receives a withdraw request from DePINC chain, we need
-    /// to verify the transaction from solana network also retrieve the number of amount
-    ///
-    /// Arguments:
-    /// * txid - The id of the transaction needs to be verified
-    ///
-    /// Returns:
-    /// * The amount needs to be transferred on DePINC chain
-    /// * Otherwise, the transaction from solana is invalid or it's not a related spl-token tx
-    fn verify(&self, txid: Self::TxID) -> Result<Self::Amount, Self::Error>;
-}
-
+use crate::depc::{extract_string_from_script_hex, Address as DePCAddress, Amount as DePCAmount, Client as DePCClient, TxID as DePCTxID, Address};
+use crate::solana::{SolanaClient as SolanaClient, TokenClient};
+const DEPOSIT_THRESHOLD: u64 = 1000;
+const WITHDRAW_THRESHOLD: u64 = 1000;
 pub struct WithdrawInfo {
-    txid: DePCTxID,
-    address: DePCAddress,
-    amount: DePCAmount,
+    sender_address: DePCAddress,
+    recipient_address: DePCAddress,
+    amount: u64,
 }
 
 pub struct DepositInfo<Address, Amount> {
     sender_address: Address,
     recipient_address: Address,
     amount: Amount,
+}
+pub struct DepcScriptData<Address> {
+    pub recipient: Address,
+    pub signature: Signature
 }
 
 pub struct Bridge<C>
@@ -70,6 +40,7 @@ where
     conn: db::Conn,
     depc_client: DePCClient,
     depc_owner_address: DePCAddress,
+    solana_owner_address: String,
     contract_client: C,
     tx_deposit: Sender<DepositInfo<C::Address, C::Amount>>,
     rx_deposit: Receiver<DepositInfo<C::Address, C::Amount>>,
@@ -85,6 +56,7 @@ where
         conn: db::Conn,
         depc_client: DePCClient,
         depc_owner_address: DePCAddress,
+        solana_owner_address: String,
         contract_client: C,
     ) -> Self {
         let (tx_deposit, rx_deposit) = channel::<DepositInfo<C::Address, C::Amount>>(1);
@@ -94,6 +66,7 @@ where
             conn,
             depc_client,
             depc_owner_address,
+            solana_owner_address,
             contract_client,
             tx_deposit,
             rx_deposit,
@@ -105,7 +78,7 @@ where
     pub async fn run(self) -> Result<()> {
         let mut tasks = vec![];
 
-        let withdraw_making_task = tokio::spawn(withdraw_making(
+        let withdraw_making_task = tokio::spawn(withdraw_processing(
             Arc::clone(&self.exit_sig),
             self.rx_withdraw,
             self.depc_owner_address.clone(),
@@ -113,7 +86,7 @@ where
         ));
         tasks.push(withdraw_making_task);
 
-        let deposit_making_task = tokio::spawn(deposit_making(
+        let deposit_making_task = tokio::spawn(deposit_processing(
             Arc::clone(&self.exit_sig),
             self.rx_deposit,
             self.contract_client.clone(),
@@ -125,25 +98,20 @@ where
             Arc::clone(&self.exit_sig),
             self.conn.clone(),
             self.depc_client,
+            self.contract_client,
             self.depc_owner_address,
+            self.solana_owner_address,
             self.tx_deposit,
             self.tx_withdraw,
         ));
         tasks.push(depc_syncing_task);
-
-        let sol_syncing_task = tokio::spawn(run_sol_syncing::<C>(
-            Arc::clone(&self.exit_sig),
-            self.contract_client.clone(),
-            self.conn,
-        ));
-        tasks.push(sol_syncing_task);
 
         futures::future::join_all(tasks).await;
         Ok(())
     }
 }
 
-pub async fn withdraw_making(
+pub async fn withdraw_processing(
     exit_sig: Arc<Mutex<bool>>,
     mut rx_withdraw: Receiver<WithdrawInfo>,
     depc_owner_address: DePCAddress,
@@ -157,14 +125,14 @@ pub async fn withdraw_making(
             }
         }
         if let Some(withdraw) = rx_withdraw.recv().await {
-            depc_client.transfer(&depc_owner_address, &withdraw.address, withdraw.amount)?;
+            depc_client.transfer(&depc_owner_address, &withdraw.recipient_address, withdraw.amount)?;
         }
         sleep(Duration::from_secs(1)).await;
     }
     Ok(())
 }
 
-pub async fn deposit_making<C>(
+pub async fn deposit_processing<C>(
     exit_sig: Arc<Mutex<bool>>,
     mut rx_deposit: Receiver<DepositInfo<C::Address, C::Amount>>,
     contract_client: C,
@@ -181,7 +149,7 @@ where
             }
         }
         if let Some(deposit) = rx_deposit.recv().await {
-            match contract_client.send(&deposit.recipient_address, deposit.amount) {
+            match contract_client.send_token(&deposit.recipient_address, deposit.amount) {
                 Ok(txid) => {
                     // update database
                     conn.confirm_deposit(&txid.to_string(), get_curr_timestamp(), "")?;
@@ -203,12 +171,15 @@ pub async fn run_depc_syncing<C>(
     exit_sig: Arc<Mutex<bool>>,
     local_db: db::Conn,
     depc_client: DePCClient,
+    contract_client: C,
     depc_owner_address: DePCAddress,
+    solana_owner_address: String,
     tx_deposit: Sender<DepositInfo<C::Address, C::Amount>>,
     tx_withdraw: Sender<WithdrawInfo>, // TODO matthew: deliver the withdrawal to this channel
 ) -> Result<()>
 where
-    C: TokenClient,
+    C: TokenClient + Send + 'static,
+    C::Error: Send + 'static,
 {
     let mut sync_height = if let Some(height) = local_db.query_best_height() {
         height + 1
@@ -245,8 +216,6 @@ where
             // transactions
             for txid in block.tx.iter() {
                 let transaction = depc_client.get_transaction(txid)?;
-                let mut deposit_info = None;
-                let mut withdraw_info: Option<WithdrawInfo> = None; // TODO matthew: withdrawal
                                                                     // information should be
                                                                     // extracted from txouts
                 assert_eq!(transaction.txid, *txid);
@@ -262,7 +231,6 @@ where
                         )?;
                     }
                 }
-                let mut amount = 0u64;
                 for txout in transaction.vout.iter() {
                     // save the txout anyway
                     if let Some(address) = txout.get_address() {
@@ -273,38 +241,46 @@ where
                             &address,
                             &txout.script_pubkey.hex,
                         )?;
-                        // check the coin is mine?
-                        if address == depc_owner_address {
-                            amount += txout.value64;
-                        }
-                    } else {
-                        // TODO matthew: the string from the script might contains both deposit and
-                        // withdrawal, they should be separated individually
-                        if let Ok(str) = extract_string_from_script_hex(&txout.script_pubkey.hex) {
-                            deposit_info = Some(str);
+                        // is our address,start processing
+                        if address == depc_owner_address{
+                            if let Ok(script_data) = extract_string_from_script_hex(&txout.script_pubkey.hex) {
+                                if txout.value64 > DEPOSIT_THRESHOLD && script_data.recipient != ""{  //deposit
+                                    local_db
+                                        .save_deposit(txid, &script_data.recipient, txout.value64, block.time)
+                                        .unwrap();
+                                    let sender_address = C::Address::from_str(&*solana_owner_address).unwrap_or_else(|_| {
+                                        panic!("invalid address");
+                                    });
+                                    let recipient_address = C::Address::from_str(&script_data.recipient)
+                                        .unwrap_or_else(|_| {
+                                            panic!("invalid address");
+                                        });
+                                    tx_deposit          //send deposit info to the channel
+                                        .send(DepositInfo::<C::Address, C::Amount> {
+                                            sender_address,
+                                            recipient_address,
+                                            amount: txout.value64.into(),
+                                        })
+                                        .await
+                                        .unwrap();
+                                }//withdraw
+                                else if txout.value64 == 0 && script_data.recipient != "" &&
+                                    script_data.signature != "".parse()? {
+                                    if let Ok(amount) = contract_client.verify(&script_data.signature, solana_owner_address.clone()){
+                                        if amount > WITHDRAW_THRESHOLD {
+                                            tx_withdraw.send(
+                                                WithdrawInfo {
+                                                    sender_address: depc_owner_address.to_string(),
+                                                    recipient_address: script_data.recipient,
+                                                    amount,
+                                                }
+                                            ).await.unwrap();
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-                if deposit_info.is_some() && amount > 0 {
-                    let to_erc20_address_str = deposit_info.unwrap();
-                    local_db
-                        .save_deposit(txid, &to_erc20_address_str, amount, block.time)
-                        .unwrap();
-                    let sender_address = C::Address::from_str("TODO the sender address should be retrieved from config or command-line arguments").unwrap_or_else(|_| {
-                        panic!("invalid address");
-                    });
-                    let recipient_address = C::Address::from_str(&to_erc20_address_str)
-                        .unwrap_or_else(|_| {
-                            panic!("invalid address");
-                        });
-                    tx_deposit
-                        .send(DepositInfo::<C::Address, C::Amount> {
-                            sender_address,
-                            recipient_address,
-                            amount: amount.into(),
-                        })
-                        .await
-                        .unwrap();
                 }
             }
         }
@@ -313,47 +289,6 @@ where
     }
     local_db.commit_transaction()?;
 
-    Ok(())
-}
-
-pub async fn run_sol_syncing<C>(
-    exit_sig: Arc<Mutex<bool>>,
-    contract_client: C,
-    conn: db::Conn,
-) -> Result<()>
-where
-    C: TokenClient,
-{
-    loop {
-        {
-            let exit = exit_sig.lock().unwrap();
-            if *exit {
-                break;
-            }
-            match contract_client.load_unfinished_withdrawals(None) {
-                Ok(withdrawals) => {
-                    for (txid, address, amount) in withdrawals.iter() {
-                        // current timestamp we should retrieve
-                        let timestamp = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs();
-                        // we need to save the withdrawal into database
-                        conn.make_withdraw(
-                            &txid.to_string(),
-                            timestamp,
-                            &address.to_string(),
-                            (amount.clone()).into(),
-                        )
-                        .unwrap();
-                    }
-                }
-                Err(e) => {
-                    error!("cannot load unfinished withdrawals, reason: {}", e);
-                }
-            }
-        }
-    }
     Ok(())
 }
 
