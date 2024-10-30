@@ -11,8 +11,10 @@ use tokio::{
 };
 
 use crate::db;
-use crate::depc::{extract_string_from_script_hex, Address as DePCAddress, Amount as DePCAmount, Client as DePCClient, TxID as DePCTxID, Address};
-use crate::solana::{SolanaClient as SolanaClient, TokenClient};
+use crate::depc::{
+    extract_string_from_script_hex, Address as DePCAddress, Client as DePCClient,
+};
+use crate::solana::TokenClient;
 const DEPOSIT_THRESHOLD: u64 = 1000;
 const WITHDRAW_THRESHOLD: u64 = 1000;
 pub struct WithdrawInfo {
@@ -264,20 +266,32 @@ where
                             )
                             .unwrap();
                         // is our address,start processing
-                        if address == depc_owner_address{
-                            if let Ok(script_data) = extract_string_from_script_hex(&txout.script_pubkey.hex) {
+                        if address == depc_owner_address {
+                            if let Ok(script_data) =
+                                extract_string_from_script_hex(&txout.script_pubkey.hex)
+                            {
                                 //TODO:2. As shown in Figure 6, a new table called recorded_transactions can be created to record the processed transactions that meet the criteria, and a check should be performed before each processing to prevent duplicate handling.
-                                if txout.value64 > DEPOSIT_THRESHOLD && script_data.recipient != ""{  //deposit
+                                if txout.value64 > DEPOSIT_THRESHOLD && script_data.recipient != ""
+                                {
+                                    //deposit
                                     local_db
-                                        .save_deposit(txid, &script_data.recipient, txout.value64, block.time)
+                                        .save_deposit(
+                                            txid,
+                                            &script_data.recipient,
+                                            txout.value64,
+                                            block.time,
+                                        )
                                         .unwrap();
-                                    let sender_address = C::Address::from_str(&*solana_owner_address).unwrap_or_else(|_| {
-                                        panic!("invalid address");
-                                    });
-                                    let recipient_address = C::Address::from_str(&script_data.recipient)
-                                        .unwrap_or_else(|_| {
-                                            panic!("invalid address");
-                                        });
+                                    let sender_address =
+                                        C::Address::from_str(&*solana_owner_address)
+                                            .unwrap_or_else(|_| {
+                                                panic!("invalid address");
+                                            });
+                                    let recipient_address =
+                                        C::Address::from_str(&script_data.recipient)
+                                            .unwrap_or_else(|_| {
+                                                panic!("invalid address");
+                                            });
                                     tx_deposit          //send deposit info to the channel
                                         .send(DepositInfo::<C::Address, C::Amount> {
                                             sender_address,

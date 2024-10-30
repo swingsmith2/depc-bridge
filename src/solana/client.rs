@@ -11,7 +11,6 @@ use solana_sdk::{
     system_instruction::transfer,
     transaction::Transaction,
 };
-use solana_transaction_status::UiTransactionEncoding;
 
 pub trait TokenClient {
     type Error: std::fmt::Display + std::fmt::Debug + Send;
@@ -54,7 +53,6 @@ pub trait TokenClient {
 #[derive(Clone)]
 pub struct SolanaClient {
     rpc_client: Arc<RpcClient>,
-    commitment_config: CommitmentConfig,
     authority_key: Arc<Keypair>,
     mint_pubkey: Pubkey,
 }
@@ -69,7 +67,6 @@ impl SolanaClient {
         let rpc_client = RpcClient::new_with_commitment(endpoint, commitment_config);
         SolanaClient {
             rpc_client: Arc::new(rpc_client),
-            commitment_config,
             authority_key: Arc::new(authority_key),
             mint_pubkey,
         }
@@ -255,15 +252,5 @@ mod tests {
 
         let balance = get_token_balance(&rpc_client, &mint_pubkey, &target_pubkey).unwrap();
         assert!(balance >= TRANSFER_LAMPORTS);
-
-        let withdrawals = client.load_unfinished_withdrawals(None).unwrap();
-        println!("total {} withdrawal(s)", withdrawals.len());
-        assert!(withdrawals.len() > 0);
-        for (signature, pubkey, amount) in withdrawals.iter() {
-            println!(
-                "signature: {}, pubkey {}, amount {}",
-                signature, pubkey, amount
-            );
-        }
     }
 }

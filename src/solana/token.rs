@@ -1,6 +1,5 @@
 use std::{thread::sleep, time::Duration};
 
-use serde_json::Value;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     account::ReadableAccount,
@@ -13,8 +12,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use solana_transaction_status::{
-    parse_instruction::ParsedInstruction, EncodedTransaction, UiInstruction, UiMessage,
-    UiParsedInstruction, UiTransaction, UiTransactionEncoding,
+    parse_instruction::ParsedInstruction, UiInstruction, UiMessage, UiParsedInstruction,
 };
 use spl_associated_token_account::{
     get_associated_token_address, instruction::create_associated_token_account,
