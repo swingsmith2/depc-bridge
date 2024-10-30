@@ -300,19 +300,33 @@ where
                                         })
                                         .await
                                         .unwrap();
-                                }//withdraw
-                                else if txout.value64 == 0 && script_data.recipient != "" &&
-                                    script_data.signature != "".parse()? {
-                                    if let Ok(amount) = contract_client.verify(&script_data.signature, solana_owner_address.clone()){
-                                        if amount > WITHDRAW_THRESHOLD {
-                                            tx_withdraw.send(
-                                                WithdrawInfo {
-                                                    sender_address: depc_owner_address.to_string(),
-                                                    recipient_address: script_data.recipient,
-                                                    amount,
-                                                }
-                                            ).await.unwrap();
-                                        }
+                                }
+                                //withdraw
+                                else if txout.value64 == 0
+                                    && script_data.recipient != ""
+                                    && script_data.signature != "".parse().unwrap()
+                                {
+                                    let res = C::Address::from_str(&solana_owner_address);
+                                    if res.is_err() {
+                                        // TODO the string cannot be converted into address object, need to handle the error
+                                        todo!()
+                                    }
+                                    let owner_address = res.unwrap();
+                                    let res = contract_client
+                                        .verify(&script_data.signature, &owner_address);
+                                    if res.is_err() {
+                                        // TODO the signature cannot be confirmed from solana network
+                                        todo!()
+                                    }
+                                    let amount = res.unwrap();
+                                    if amount > WITHDRAW_THRESHOLD {
+                                        tx_withdraw
+                                            .send(WithdrawInfo {
+                                                sender_address: depc_owner_address.to_string(),
+                                                recipient_address: script_data.recipient,
+                                                amount,
+                                            })
+                                            .await.unwrap();
                                     }
                                 }
                             }

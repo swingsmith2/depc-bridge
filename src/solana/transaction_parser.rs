@@ -7,7 +7,6 @@ use solana_transaction_status::{
 };
 
 pub struct TplTokenTransaction {
-    pub(crate) mint_pubkey: Pubkey,
     pub(crate) source: Pubkey,
     pub(crate) destination: Pubkey,
     pub(crate) amount: u64,
@@ -15,10 +14,20 @@ pub struct TplTokenTransaction {
 
 use super::Error;
 
-pub fn parse_transaction(
+/// # Load a transaction by the signature through RPC service
+///
+/// * `rpc_client`: The RPC service connection is established by this client object
+/// * `signature`: The signature represents the transaction from solana network
+/// * `authority_pubkey`: The public-key of the authority, the source/destination
+///
+/// # Return
+/// A set of TplTokenTransaction objects. A transaction might contains more than one
+/// instructions, so there is an object list should be returned, if the list is empty
+/// that means the transaction doesn't contain any tpl-token record.
+pub fn parse_tpl_token_signature(
     rpc_client: &RpcClient,
     signature: &Signature,
-    mint_pubkey: Pubkey,
+    authority_pubkey: &Pubkey,
 ) -> Result<Vec<TplTokenTransaction>, Error> {
     let mut tpl_token_txs = vec![];
     let res = rpc_client.get_transaction(&signature, UiTransactionEncoding::JsonParsed);
@@ -41,18 +50,21 @@ pub fn parse_transaction(
                     // check the program-id and ensure it is related to our mint program
                     let program_id = Pubkey::from_str(&instruction.program_id).unwrap();
                     if program_id == spl_token::id() {
-                        // ok, related
+                        // it's tpl-token
                         let info = &instruction.parsed["info"];
+                        println!("spl-token info: {}", info.to_string());
+                        // ensure the instruction related to the authority's spl-token
                         let source = Pubkey::from_str(&info["source"].as_str().unwrap()).unwrap();
                         let destination =
                             Pubkey::from_str(&info["destination"].as_str().unwrap()).unwrap();
-                        let amount = info["amount"].as_str().unwrap().parse().unwrap();
-                        tpl_token_txs.push(TplTokenTransaction {
-                            mint_pubkey,
-                            source,
-                            destination,
-                            amount,
-                        });
+                        if source == *authority_pubkey || destination == *authority_pubkey {
+                            let amount = info["amount"].as_str().unwrap().parse().unwrap();
+                            tpl_token_txs.push(TplTokenTransaction {
+                                source,
+                                destination,
+                                amount,
+                            });
+                        }
                     }
                 }
             }
@@ -84,6 +96,9 @@ mod tests {
     const MINT_KEY: &str =
         "BwNBH51VS47q9tBeeRicPjfKB5k4ys3UkyjRD9wxWDnhDGpESsTywH5SPtb3cYG9Ec3gbezNM3SsjGZGNHqdBdR";
 
+    const SPL_TOKEN_SIGNATURE: &str =
+        "58pf2apLq8Uti8b45jKedN9chbPveiW6PeMUTXBvZ2UwgHdhtCoRtRK3R97Jre27DDQD8adztXhTwV9yNvBhBymV";
+
     #[test]
     fn test_parse() {
         let authority_key = Keypair::from_base58_string(AUTHORITY_KEY);
@@ -96,18 +111,9 @@ mod tests {
             get_associated_token_address(&authority_key.pubkey(), &mint_key.pubkey());
         println!("authority associated pubkey: {}", associated_pubkey);
 
-        let signatures = rpc_client
-            .get_signatures_for_address(&authority_key.pubkey())
-            .unwrap();
-        for signature in signatures.iter() {
-            let signature = Signature::from_str(&signature.signature).unwrap();
-            let txs = parse_transaction(&rpc_client, &signature, mint_key.pubkey()).unwrap();
-            for tx in txs.iter() {
-                println!(
-                    "signature: {}, source: {}, destination: {}, amount: {}",
-                    signature, tx.source, tx.destination, tx.amount
-                );
-            }
-        }
+        let signature = Signature::from_str(SPL_TOKEN_SIGNATURE).unwrap();
+        let records =
+            parse_tpl_token_signature(&rpc_client, &signature, &associated_pubkey).unwrap();
+        assert!(!records.is_empty());
     }
 }
