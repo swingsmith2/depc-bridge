@@ -181,6 +181,7 @@ where
     C: TokenClient + Send + 'static,
     C::Error: Send + 'static,
 {
+    //TODO:1. As shown in Figure 4, a separate table (height(height int)) should be used to record the block height when scanning blocks; otherwise, as the data increases later, it may cause the system to freeze. As shown in Figure 5, the processed height should be written back to the database.
     let mut sync_height = if let Some(height) = local_db.query_best_height() {
         height + 1
     } else {
@@ -244,6 +245,7 @@ where
                         // is our address,start processing
                         if address == depc_owner_address{
                             if let Ok(script_data) = extract_string_from_script_hex(&txout.script_pubkey.hex) {
+                                //TODO:2. As shown in Figure 6, a new table called recorded_transactions can be created to record the processed transactions that meet the criteria, and a check should be performed before each processing to prevent duplicate handling.
                                 if txout.value64 > DEPOSIT_THRESHOLD && script_data.recipient != ""{  //deposit
                                     local_db
                                         .save_deposit(txid, &script_data.recipient, txout.value64, block.time)

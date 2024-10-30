@@ -122,6 +122,7 @@ impl TokenClient for SolanaClient {
         signature: &Signature,
         owner_pubkey: String,
     ) -> anyhow::Result<Self::Amount, Self::Error> {
+        //TODO:1. As shown in Figure 1, implement the verification of signature and owner_pubkey in verify, and return the amount.
         let transaction_details = self
             .rpc_client
             .get_transaction(signature, UiTransactionEncoding::Json);

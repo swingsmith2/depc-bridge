@@ -3,6 +3,7 @@ use crate::bridge::DepcScriptData;
 use log::error;
 
 pub fn extract_string_from_script_hex(hex_str: &str) -> Result<DepcScriptData<Address>, Error> {
+    //TODO:2. As shown in Figures 2 and 3, implement extract_string_from_script_hex to return in the format of the struct DepcScriptData. The deposit direction only includes the recipient (which is the Solana receiving address specified by the user), while the withdraw direction includes both the recipient and the signature (which is a special request transaction initiated by the user on the DePINC chain with an amount of 0, including the signature of the new transaction on the Solana chain and the target address for withdrawal on the DePINC chain)."
     let data = match hex::decode(hex_str) {
         Ok(r) => r,
         Err(_) => {
