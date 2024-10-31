@@ -1,6 +1,10 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
-use solana_client::rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient};
+use crate::solana::parse_tpl_token_signature;
+
+use super::{send_token, Error};
+use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
@@ -9,16 +13,45 @@ use solana_sdk::{
     system_instruction::transfer,
     transaction::Transaction,
 };
-use spl_associated_token_account::get_associated_token_address;
 
-use crate::{bridge::TokenClient, solana::parse_transaction};
+pub trait TokenClient {
+    type Error: std::fmt::Display + std::fmt::Debug + Send;
+    type Address: ToString + FromStr<Err: std::fmt::Debug + Send> + Clone + Send;
+    type Amount: Into<u64> + From<u64> + Clone + Send;
+    type TxID: ToString + FromStr + Clone + Send;
 
-use super::{send_token, Error};
+    /// # Send spl-token to target account
+    ///
+    /// Arguments:
+    /// * recipient_address - The target account from spl-token
+    /// * amount - Total amount the authority needs to send
+    ///
+    /// Returns:
+    /// * The signature of the new transaction from solana network
+    /// * Otherwise the transaction cannot be made, check the error
+    fn send_token(
+        &self,
+        recipient_address: &Self::Address,
+        amount: Self::Amount,
+    ) -> anyhow::Result<Self::TxID, Self::Error>;
+
+    /// # Verify a transaction
+    /// After the authority receives a withdraw request from DePINC chain, we need
+    /// to verify the transaction from solana network also retrieve the number of amount
+    ///
+    /// Arguments:
+    /// * txid - The id of the transaction needs to be verified
+    /// * owner - The public-key(or address) of the authority (related token address)
+    ///
+    /// Returns:
+    /// * The amount needs to be transferred on DePINC chain
+    /// * Otherwise, the transaction from solana is invalid or it's not a related spl-token tx
+    fn verify(&self, signature: &Signature, owner: &Self::Address) -> Result<u64, Self::Error>;
+}
 
 #[derive(Clone)]
 pub struct SolanaClient {
     rpc_client: Arc<RpcClient>,
-    commitment_config: CommitmentConfig,
     authority_key: Arc<Keypair>,
     mint_pubkey: Pubkey,
 }
@@ -33,7 +66,6 @@ impl SolanaClient {
         let rpc_client = RpcClient::new_with_commitment(endpoint, commitment_config);
         SolanaClient {
             rpc_client: Arc::new(rpc_client),
-            commitment_config,
             authority_key: Arc::new(authority_key),
             mint_pubkey,
         }
@@ -66,7 +98,7 @@ impl TokenClient for SolanaClient {
     type Amount = u64;
     type TxID = Signature;
 
-    fn send(
+    fn send_token(
         &self,
         recipient_address: &Self::Address,
         amount: Self::Amount,
@@ -81,40 +113,20 @@ impl TokenClient for SolanaClient {
         Ok(signature)
     }
 
-    fn load_unfinished_withdrawals(
-        &self,
-        after: Option<Signature>,
-    ) -> Result<Vec<(Self::TxID, Self::Address, Self::Amount)>, Self::Error> {
-        let token_pubkey =
-            get_associated_token_address(&self.authority_key.pubkey(), &self.mint_pubkey);
-        // fetch signatures of transactions involving this token account
-        let signatures = self
-            .rpc_client
-            .get_signatures_for_address_with_config(
-                &token_pubkey,
-                GetConfirmedSignaturesForAddress2Config {
-                    before: None,
-                    until: after,
-                    limit: None,
-                    commitment: Some(self.commitment_config),
-                },
-            )
-            .unwrap();
-        println!("the number of signatures is: {}", signatures.len());
-
-        let mut withdrawals = vec![];
-        for signature_info in signatures.iter() {
-            let signature = signature_info.signature.parse::<Signature>().unwrap();
-            println!("analyzing signature: {}", signature);
-            let res = parse_transaction(&self.rpc_client, &signature, self.mint_pubkey);
-            if let Ok(tpl_token_txs) = res {
-                for tx in tpl_token_txs.iter() {
-                    withdrawals.push((signature, tx.source, tx.amount));
-                }
-            }
+    fn verify(&self, signature: &Signature, owner: &Pubkey) -> Result<Self::Amount, Self::Error> {
+        let records = parse_tpl_token_signature(&self.rpc_client, signature, owner)?;
+        if records.is_empty() {
+            return Err(Error::NotARelatedTransactionOfAuthority(
+                signature.to_string(),
+            ));
         }
-
-        Ok(withdrawals)
+        if records.len() > 1 {
+            return Err(Error::MoreThanOneRelatedInstructionsFoundFrom1Transaction(
+                signature.to_string(),
+            ));
+        }
+        let record = &records.first().unwrap();
+        Ok(record.amount)
     }
 }
 
@@ -172,13 +184,13 @@ mod tests {
                 8,
                 DEFAULT_MINT_AMOUNT,
             )
-            .unwrap();
+                .unwrap();
             wait_transaction_until_processed(
                 &rpc_client,
                 &signature,
                 CommitmentConfig::confirmed(),
             )
-            .unwrap();
+                .unwrap();
             // check the token balance of the mint account
             let balance =
                 get_token_balance(&rpc_client, &mint_pubkey, &authority_key.pubkey()).unwrap();
@@ -213,25 +225,17 @@ mod tests {
                 &signature,
                 CommitmentConfig::confirmed(),
             )
-            .unwrap();
+                .unwrap();
         }
 
         // send with SolanaClient
-        client.send(&target_pubkey, TRANSFER_LAMPORTS).unwrap();
+        client
+            .send_token(&target_pubkey, TRANSFER_LAMPORTS)
+            .unwrap();
         wait_transaction_until_processed(&rpc_client, &signature, CommitmentConfig::confirmed())
             .unwrap();
 
         let balance = get_token_balance(&rpc_client, &mint_pubkey, &target_pubkey).unwrap();
         assert!(balance >= TRANSFER_LAMPORTS);
-
-        let withdrawals = client.load_unfinished_withdrawals(None).unwrap();
-        println!("total {} withdrawal(s)", withdrawals.len());
-        assert!(withdrawals.len() > 0);
-        for (signature, pubkey, amount) in withdrawals.iter() {
-            println!(
-                "signature: {}, pubkey {}, amount {}",
-                signature, pubkey, amount
-            );
-        }
     }
 }

@@ -79,13 +79,14 @@ async fn main() -> Result<()> {
                 conn.clone(),
                 client,
                 args.depc_owner_address,
+                args.solana_owner_address,
                 contract_client,
             );
             let bridge_handler = bridge.run();
 
             // running webservice
             run_service(&args.bind, conn, exit_sig).await;
-            bridge_handler.await?;
+            bridge_handler.await.unwrap();
 
             info!("exit.");
             Ok(())

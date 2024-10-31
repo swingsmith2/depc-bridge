@@ -25,6 +25,8 @@ pub struct Run {
     pub depc_rpc_use_proxy: bool,
     #[arg(long)]
     pub depc_owner_address: String,
+    #[arg(long)]
+    pub solana_owner_address: String,
     /// The endpoint string should be used for establishing connection to solana node
     #[arg(long, default_value = "https://api.devnet.solana.com")]
     pub sol_endpoint: String,

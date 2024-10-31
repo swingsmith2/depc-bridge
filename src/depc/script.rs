@@ -1,6 +1,8 @@
-use super::Error;
+use super::{Address, Error};
+use crate::bridge::DepcScriptData;
 
-pub fn extract_string_from_script_hex(hex_str: &str) -> Result<String, Error> {
+pub fn extract_string_from_script_hex(hex_str: &str) -> Result<DepcScriptData<Address>, Error> {
+    //TODO:2. As shown in Figures 2 and 3, implement extract_string_from_script_hex to return in the format of the struct DepcScriptData. The deposit direction only includes the recipient (which is the Solana receiving address specified by the user), while the withdraw direction includes both the recipient and the signature (which is a special request transaction initiated by the user on the DePINC chain with an amount of 0, including the signature of the new transaction on the Solana chain and the target address for withdrawal on the DePINC chain)."
     let data = match hex::decode(hex_str) {
         Ok(r) => r,
         Err(_) => {
@@ -21,7 +23,7 @@ pub fn extract_string_from_script_hex(hex_str: &str) -> Result<String, Error> {
         return Err(Error::InvalidScript);
     }
 
-    Ok(decode_script_after_op_return(&data[6..])?.to_owned())
+    Ok(decode_script_after_op_return(&data[6..])?)
 }
 
 const OP_RETURN: u8 = 0x6au8;
@@ -29,7 +31,7 @@ const OP_PUSHDATA1: u8 = 0x4cu8;
 const OP_PUSHDATA2: u8 = 0x4du8;
 const OP_PUSHDATA4: u8 = 0x4eu8;
 
-fn decode_script_after_op_return(script: &[u8]) -> Result<&str, Error> {
+fn decode_script_after_op_return(script: &[u8]) -> Result<DepcScriptData<Address>, Error> {
     let opcode = *match script.get(0) {
         Some(c) => c,
         None => {
@@ -67,22 +69,17 @@ fn decode_script_after_op_return(script: &[u8]) -> Result<&str, Error> {
     // ensure the length of slice equals to the number of size which is calculated from above
     let slice = &script[start_index..];
     assert_eq!(slice.len(), size);
-    Ok(match std::str::from_utf8(&slice) {
-        Ok(s) => s,
-        Err(_) => {
-            return Err(Error::InvalidStringFromScript);
-        }
-    })
-}
+    // Ok(match std::str::from_utf8(&slice) {
+    //     Ok(s) => s,
+    //     Err(_) => {
+    //         return Err(Error::InvalidStringFromScript);
+    //     }
+    // })
+    let script: DepcScriptData<Address>;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test() {
-        const HEX: &str = "6a04130000001168656c6c6f20776f726c6420616761696e";
-        let s = extract_string_from_script_hex(HEX).unwrap();
-        assert_eq!(s, "hello world again");
-    }
+    script = DepcScriptData {
+        recipient: "".parse().unwrap(),
+        signature: "".parse().unwrap(),
+    };
+    Ok(script)
 }
