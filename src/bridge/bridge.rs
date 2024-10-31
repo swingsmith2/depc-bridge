@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{error, info};
 
-use anyhow::Result;
 use solana_sdk::signature::Signature;
 use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
@@ -12,8 +11,10 @@ use tokio::{
 };
 
 use crate::db;
-use crate::depc::{extract_string_from_script_hex, Address as DePCAddress, Amount as DePCAmount, Client as DePCClient, TxID as DePCTxID, Address};
-use crate::solana::{SolanaClient as SolanaClient, TokenClient};
+use crate::depc::{
+    extract_string_from_script_hex, Address as DePCAddress, Client as DePCClient,
+};
+use crate::solana::TokenClient;
 const DEPOSIT_THRESHOLD: u64 = 1000;
 const WITHDRAW_THRESHOLD: u64 = 1000;
 pub struct WithdrawInfo {
@@ -29,7 +30,12 @@ pub struct DepositInfo<Address, Amount> {
 }
 pub struct DepcScriptData<Address> {
     pub recipient: Address,
-    pub signature: Signature
+    pub signature: Signature,
+}
+
+#[derive(Debug)]
+pub enum Error {
+    General,
 }
 
 pub struct Bridge<C>
@@ -75,7 +81,7 @@ where
         }
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(self) -> Result<(), Error> {
         let mut tasks = vec![];
 
         let withdraw_making_task = tokio::spawn(withdraw_processing(
@@ -116,7 +122,7 @@ pub async fn withdraw_processing(
     mut rx_withdraw: Receiver<WithdrawInfo>,
     depc_owner_address: DePCAddress,
     depc_client: DePCClient,
-) -> Result<()> {
+) -> Result<(), Error> {
     loop {
         {
             let exit = exit_sig.lock().unwrap();
@@ -125,7 +131,17 @@ pub async fn withdraw_processing(
             }
         }
         if let Some(withdraw) = rx_withdraw.recv().await {
-            depc_client.transfer(&depc_owner_address, &withdraw.recipient_address, withdraw.amount)?;
+            let res = depc_client.transfer(
+                &depc_owner_address,
+                &withdraw.recipient_address,
+                withdraw.amount,
+            );
+            if res.is_err() {
+                return Err(Error::General);
+            }
+            let _txid = res.unwrap();
+            todo!() // TODO The transaction is processed, we might need to record it to local
+                    // database and verify it
         }
         sleep(Duration::from_secs(1)).await;
     }
@@ -137,7 +153,7 @@ pub async fn deposit_processing<C>(
     mut rx_deposit: Receiver<DepositInfo<C::Address, C::Amount>>,
     contract_client: C,
     conn: db::Conn,
-) -> Result<()>
+) -> Result<(), Error>
 where
     C: TokenClient,
 {
@@ -152,7 +168,8 @@ where
             match contract_client.send_token(&deposit.recipient_address, deposit.amount) {
                 Ok(txid) => {
                     // update database
-                    conn.confirm_deposit(&txid.to_string(), get_curr_timestamp(), "")?;
+                    conn.confirm_deposit(&txid.to_string(), get_curr_timestamp(), "")
+                        .unwrap();
                 }
                 Err(e) => {
                     error!(
@@ -176,7 +193,7 @@ pub async fn run_depc_syncing<C>(
     solana_owner_address: String,
     tx_deposit: Sender<DepositInfo<C::Address, C::Amount>>,
     tx_withdraw: Sender<WithdrawInfo>, // TODO matthew: deliver the withdrawal to this channel
-) -> Result<()>
+) -> Result<(), Error>
 where
     C: TokenClient + Send + 'static,
     C::Error: Send + 'static,
@@ -187,7 +204,7 @@ where
     } else {
         0
     };
-    local_db.begin_transaction()?;
+    local_db.begin_transaction().unwrap();
 
     loop {
         {
@@ -196,7 +213,7 @@ where
                 break;
             }
         }
-        let chain_height = depc_client.get_height()?;
+        let chain_height = depc_client.get_height().unwrap();
         if sync_height > chain_height {
             // there is no more block left to sync, wait for 5 seconds...
             sleep(Duration::from_secs(5)).await;
@@ -208,55 +225,73 @@ where
         );
 
         // block
-        let block_hash = depc_client.get_block_hash(sync_height)?;
-        let block = depc_client.get_block(&block_hash)?;
+        let block_hash = depc_client.get_block_hash(sync_height).unwrap();
+        let block = depc_client.get_block(&block_hash).unwrap();
         assert_eq!(block.height, sync_height);
-        local_db.add_block(&block.hash, sync_height, &block.miner, block.time)?;
+        local_db
+            .add_block(&block.hash, sync_height, &block.miner, block.time)
+            .unwrap();
 
         if sync_height > 0 {
             // transactions
             for txid in block.tx.iter() {
-                let transaction = depc_client.get_transaction(txid)?;
-                                                                    // information should be
-                                                                    // extracted from txouts
+                let transaction = depc_client.get_transaction(txid).unwrap();
+                // information should be
+                // extracted from txouts
                 assert_eq!(transaction.txid, *txid);
-                local_db.add_transaction(&block_hash, txid)?;
+                local_db.add_transaction(&block_hash, txid).unwrap();
                 for txin in transaction.vin.iter() {
                     if !txin.is_coinbase() {
                         // TODO maybe we need to check the validity of the txin?
-                        local_db.mark_coin_to_spent(
-                            &txin.txid.clone().unwrap(),
-                            txin.vout.unwrap(),
-                            txid,
-                            sync_height,
-                        )?;
+                        local_db
+                            .mark_coin_to_spent(
+                                &txin.txid.clone().unwrap(),
+                                txin.vout.unwrap(),
+                                txid,
+                                sync_height,
+                            )
+                            .unwrap();
                     }
                 }
                 for txout in transaction.vout.iter() {
                     // save the txout anyway
                     if let Some(address) = txout.get_address() {
-                        local_db.add_coin(
-                            txid,
-                            txout.n,
-                            txout.value64,
-                            &address,
-                            &txout.script_pubkey.hex,
-                        )?;
+                        local_db
+                            .add_coin(
+                                txid,
+                                txout.n,
+                                txout.value64,
+                                &address,
+                                &txout.script_pubkey.hex,
+                            )
+                            .unwrap();
                         // is our address,start processing
-                        if address == depc_owner_address{
-                            if let Ok(script_data) = extract_string_from_script_hex(&txout.script_pubkey.hex) {
+                        if address == depc_owner_address {
+                            if let Ok(script_data) =
+                                extract_string_from_script_hex(&txout.script_pubkey.hex)
+                            {
                                 //TODO:2. As shown in Figure 6, a new table called recorded_transactions can be created to record the processed transactions that meet the criteria, and a check should be performed before each processing to prevent duplicate handling.
-                                if txout.value64 > DEPOSIT_THRESHOLD && script_data.recipient != ""{  //deposit
+                                if txout.value64 > DEPOSIT_THRESHOLD && script_data.recipient != ""
+                                {
+                                    //deposit
                                     local_db
-                                        .save_deposit(txid, &script_data.recipient, txout.value64, block.time)
+                                        .save_deposit(
+                                            txid,
+                                            &script_data.recipient,
+                                            txout.value64,
+                                            block.time,
+                                        )
                                         .unwrap();
-                                    let sender_address = C::Address::from_str(&*solana_owner_address).unwrap_or_else(|_| {
-                                        panic!("invalid address");
-                                    });
-                                    let recipient_address = C::Address::from_str(&script_data.recipient)
-                                        .unwrap_or_else(|_| {
-                                            panic!("invalid address");
-                                        });
+                                    let sender_address =
+                                        C::Address::from_str(&*solana_owner_address)
+                                            .unwrap_or_else(|_| {
+                                                panic!("invalid address");
+                                            });
+                                    let recipient_address =
+                                        C::Address::from_str(&script_data.recipient)
+                                            .unwrap_or_else(|_| {
+                                                panic!("invalid address");
+                                            });
                                     tx_deposit          //send deposit info to the channel
                                         .send(DepositInfo::<C::Address, C::Amount> {
                                             sender_address,
@@ -265,19 +300,33 @@ where
                                         })
                                         .await
                                         .unwrap();
-                                }//withdraw
-                                else if txout.value64 == 0 && script_data.recipient != "" &&
-                                    script_data.signature != "".parse()? {
-                                    if let Ok(amount) = contract_client.verify(&script_data.signature, solana_owner_address.clone()){
-                                        if amount > WITHDRAW_THRESHOLD {
-                                            tx_withdraw.send(
-                                                WithdrawInfo {
-                                                    sender_address: depc_owner_address.to_string(),
-                                                    recipient_address: script_data.recipient,
-                                                    amount,
-                                                }
-                                            ).await.unwrap();
-                                        }
+                                }
+                                //withdraw
+                                else if txout.value64 == 0
+                                    && script_data.recipient != ""
+                                    && script_data.signature != "".parse().unwrap()
+                                {
+                                    let res = C::Address::from_str(&solana_owner_address);
+                                    if res.is_err() {
+                                        // TODO the string cannot be converted into address object, need to handle the error
+                                        todo!()
+                                    }
+                                    let owner_address = res.unwrap();
+                                    let res = contract_client
+                                        .verify(&script_data.signature, &owner_address);
+                                    if res.is_err() {
+                                        // TODO the signature cannot be confirmed from solana network
+                                        todo!()
+                                    }
+                                    let amount = res.unwrap();
+                                    if amount > WITHDRAW_THRESHOLD {
+                                        tx_withdraw
+                                            .send(WithdrawInfo {
+                                                sender_address: depc_owner_address.to_string(),
+                                                recipient_address: script_data.recipient,
+                                                amount,
+                                            })
+                                            .await.unwrap();
                                     }
                                 }
                             }
@@ -289,7 +338,7 @@ where
 
         sync_height += 1;
     }
-    local_db.commit_transaction()?;
+    local_db.commit_transaction().unwrap();
 
     Ok(())
 }
