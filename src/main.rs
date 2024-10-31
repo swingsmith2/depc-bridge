@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
 
             // running webservice
             run_service(&args.bind, conn, exit_sig).await;
-            bridge_handler.await?;
+            bridge_handler.await.unwrap();
 
             info!("exit.");
             Ok(())
