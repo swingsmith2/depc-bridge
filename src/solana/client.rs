@@ -51,7 +51,7 @@ pub trait TokenClient {
 
 #[derive(Clone)]
 pub struct SolanaClient {
-    rpc_client: Arc<RpcClient>,
+    pub rpc_client: Arc<RpcClient>,
     authority_key: Arc<Keypair>,
     mint_pubkey: Pubkey,
 }
