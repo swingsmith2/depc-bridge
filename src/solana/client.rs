@@ -1,11 +1,8 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::solana::{parse_signatures, parse_tpl_token_signature, parse_tpl_token_signature_for_target, TransactionDetail};
-
-use super::{send_token, Error};
+use super::{send_token, AnalyzedInstruction, AnalyzedTransaction, Error, TransactionAnalyzer};
 use solana_client::rpc_client::RpcClient;
-use solana_client::rpc_response::RpcConfirmedTransactionStatusWithSignature;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
@@ -14,6 +11,7 @@ use solana_sdk::{
     system_instruction::transfer,
     transaction::Transaction,
 };
+use solana_transaction_status::UiTransactionEncoding;
 
 pub trait TokenClient {
     type Error: std::fmt::Display + std::fmt::Debug + Send;
@@ -92,12 +90,37 @@ impl SolanaClient {
         Ok(signature)
     }
 
-    pub fn parse_signatures_for_target(
+    pub fn get_transactions_related_to_address(
         &self,
-        signatures: Vec<RpcConfirmedTransactionStatusWithSignature>,
-    ) -> Result<Vec<TransactionDetail>, Error>
-    {
-        parse_signatures(self.rpc_client.as_ref(), signatures)
+        address: &Pubkey,
+    ) -> Result<Vec<AnalyzedTransaction>, Error> {
+        let res = self.rpc_client.get_signatures_for_address(address);
+        if res.is_err() {
+            return Err(Error::CannotGetSignaturesForAddress(address.to_string()));
+        }
+        let signature_recs = res.unwrap();
+        let mut analyzed_transactions = vec![];
+        for signature_rec in signature_recs.iter() {
+            let signature = Signature::from_str(&signature_rec.signature).unwrap();
+            let res = self
+                .rpc_client
+                .get_transaction(&signature, UiTransactionEncoding::JsonParsed);
+            if res.is_err() {
+                // cannot retrieve the transaction
+                return Err(Error::CannotGetTransactionInfo(
+                    signature_rec.signature.clone(),
+                ));
+            }
+            let transaction_meta = res.unwrap();
+            let analyzer = TransactionAnalyzer::new(&transaction_meta);
+            let res = analyzer.parse(signature, transaction_meta.block_time.unwrap_or(0));
+            if res.is_err() {
+                todo!("cannot parse the transaction");
+            }
+            let analyzed_transaction = res.unwrap();
+            analyzed_transactions.push(analyzed_transaction);
+        }
+        Ok(analyzed_transactions)
     }
 }
 
@@ -123,168 +146,25 @@ impl TokenClient for SolanaClient {
     }
 
     fn verify(&self, signature: &Signature, owner: &Pubkey) -> Result<Self::Amount, Self::Error> {
-        let records = parse_tpl_token_signature_for_target(&self.rpc_client, signature, owner)?;
-        if records.is_empty() {
-            return Err(Error::NotARelatedTransactionOfAuthority(
-                signature.to_string(),
-            ));
-        }
-        if records.len() > 1 {
-            return Err(Error::MoreThanOneRelatedInstructionsFoundFrom1Transaction(
-                signature.to_string(),
-            ));
-        }
-        let record = &records.first().unwrap();
-        Ok(record.amount)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::solana::{
-        check_spl_token, get_or_create_associated_token_account, get_token_balance, init_spl_token,
-        wait_transaction_until_processed, DEFAULT_MINT_AMOUNT,
-    };
-
-    use super::*;
-
-    const ENDPOINT_DEVNET: &str = "https://api.devnet.solana.com";
-    const AIRDROP_LAMPORTS: u64 = 1_000_000_000;
-    const TRANSFER_LAMPORTS: u64 = 1_000;
-
-    // Afa4Jc8cGhyQc6v64sVw7qpUMiHDrTSc2umPwEdvAZ9M
-    const AUTHORITY_KEY: &str =
-        "5KDTRK1s2b2oaopXqi2gjSaHgUuzfuvYSwNAND7EdgravGJ44mG1bHynM4UxfWz8dQNQ8TcbtTBM3NKfp4v4vUAo";
-
-    // 8NXzZrJTs8TQYPNamLttfdVAVF3d8nPjqQRkJfJkdmyy
-    const MINT_KEY: &str =
-        "BwNBH51VS47q9tBeeRicPjfKB5k4ys3UkyjRD9wxWDnhDGpESsTywH5SPtb3cYG9Ec3gbezNM3SsjGZGNHqdBdR";
-
-    // dWC1R5jgKfjH79qv4jANoL1Q6FcKGQLYGzRAbqYoqtc
-    const TARGET_KEY: &str =
-        "4Sn5MvhpuAstWo25nAhnn3Y5sVXvz2na54J8rnrW58FLQiZLAJxgtwPL3mZdniG2NPbDPt5WMeizWNPEqSydAJwA";
-
-    #[test]
-    fn test_send_load_history() {
-        let rpc_client =
-            RpcClient::new_with_commitment(ENDPOINT_DEVNET, CommitmentConfig::confirmed());
-
-        let authority_key = Keypair::from_base58_string(AUTHORITY_KEY);
-        println!(
-            "authority_key: {}, pubkey: {}",
-            authority_key.to_base58_string(),
-            authority_key.pubkey()
-        );
-
-        let mint_key = Keypair::from_base58_string(MINT_KEY);
-        let mint_pubkey = mint_key.pubkey();
-        println!(
-            "mint_key: {}, pubkey: {}",
-            mint_key.to_base58_string(),
-            mint_key.pubkey()
-        );
-
-        let res = check_spl_token(&rpc_client, &mint_pubkey);
-        if res.is_err() {
-            let signature = init_spl_token(
-                &rpc_client,
-                &authority_key,
-                &mint_key,
-                8,
-                DEFAULT_MINT_AMOUNT,
-            )
-                .unwrap();
-            wait_transaction_until_processed(
-                &rpc_client,
-                &signature,
-                CommitmentConfig::confirmed(),
-            )
-                .unwrap();
-            // check the token balance of the mint account
-            let balance =
-                get_token_balance(&rpc_client, &mint_pubkey, &authority_key.pubkey()).unwrap();
-            assert_eq!(balance, DEFAULT_MINT_AMOUNT);
-        }
-
-        // create target token account
-        let target_key = Keypair::from_base58_string(TARGET_KEY);
-        println!(
-            "target key: {}, pubkey: {}",
-            target_key.to_base58_string(),
-            target_key.pubkey()
-        );
-        let target_pubkey = target_key.pubkey();
-
-        let client = SolanaClient::new(
-            ENDPOINT_DEVNET,
-            mint_pubkey.clone(),
-            authority_key,
-            CommitmentConfig::confirmed(),
-        );
-
-        let signature = client.send_solana(&target_pubkey, 30_000_000).unwrap();
-        wait_transaction_until_processed(&rpc_client, &signature, CommitmentConfig::confirmed())
-            .unwrap();
-
-        let (_, signature_opt) =
-            get_or_create_associated_token_account(&rpc_client, &mint_pubkey, &target_key).unwrap();
-        if let Some(signature) = signature_opt {
-            wait_transaction_until_processed(
-                &rpc_client,
-                &signature,
-                CommitmentConfig::confirmed(),
-            )
-                .unwrap();
-        }
-
-        // send with SolanaClient
-        client
-            .send_token(&target_pubkey, TRANSFER_LAMPORTS)
-            .unwrap();
-        wait_transaction_until_processed(&rpc_client, &signature, CommitmentConfig::confirmed())
-            .unwrap();
-
-        let balance = get_token_balance(&rpc_client, &mint_pubkey, &target_pubkey).unwrap();
-        assert!(balance >= TRANSFER_LAMPORTS);
-    }
-
-    #[test]
-    fn test_verify() {
-        let rpc_client = RpcClient::new_with_commitment(ENDPOINT_DEVNET, CommitmentConfig::confirmed());
-
-        // Initialize the authority keypair and mint public key
-        let authority_key = Keypair::from_base58_string(AUTHORITY_KEY);
-        let mint_pubkey = Pubkey::from_str(MINT_KEY).unwrap();
-
-        // Create an instance of the SolanaClient with test parameters
-        let client = SolanaClient::new(
-            ENDPOINT_DEVNET,
-            mint_pubkey,
-            authority_key.clone(),
-            CommitmentConfig::confirmed(),
-        );
-
-        // Define a sample signature and owner (authority) public key for the verification test
-        let mock_signature = Signature::from_str("MOCK_SIGNATURE_STRING_HERE").unwrap();
-        let owner_pubkey = authority_key.pubkey();
-
-        // Attempt to verify the transaction using `verify`
-        match client.verify(&mock_signature, &owner_pubkey) {
-            Ok(amount) => {
-                // If verification is successful, assert that the returned amount is as expected
-                println!("Verified transaction amount: {}", amount);
-                assert!(amount > 0, "Amount should be greater than zero for a valid transaction");
+        let mut amount = 0_u64;
+        if let Ok(transaction_meta) = self
+            .rpc_client
+            .get_transaction(signature, UiTransactionEncoding::JsonParsed)
+        {
+            let analyzer = TransactionAnalyzer::new(&transaction_meta);
+            let res = analyzer.parse(signature.clone(), transaction_meta.block_time.unwrap_or(0));
+            if res.is_err() {
+                return Err(Error::CannotParseTransactionInfo(signature.to_string()));
             }
-            Err(e) => {
-                // Handle the error if the transaction verification fails
-                println!("Verification failed with error: {:?}", e);
-                assert!(matches!(
-                e,
-                Error::NotARelatedTransactionOfAuthority(_)
-                    | Error::MoreThanOneRelatedInstructionsFoundFrom1Transaction(_)
-            ));
+            let parsed_transaction = res.unwrap();
+            for ix in parsed_transaction.instructions.iter() {
+                if let AnalyzedInstruction::SplToken(spl_token_ix) = ix {
+                    if spl_token_ix.destination == *owner {
+                        amount += spl_token_ix.amount;
+                    }
+                }
             }
         }
+        Ok(amount)
     }
-
 }

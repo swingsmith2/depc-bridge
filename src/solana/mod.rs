@@ -1,11 +1,14 @@
-mod transaction_parser;
+mod analyzer;
 
 mod client;
 mod token;
 
 mod error;
 
-pub use transaction_parser::*;
+pub use analyzer::{
+    Instruction as AnalyzedInstruction, InstructionDetail, Transaction as AnalyzedTransaction,
+    TransactionAnalyzer,
+};
 
 pub use client::*;
 pub use token::*;

@@ -13,6 +13,7 @@ pub enum Error {
     CannotUnpackAccountData(String),
     CannotGetStatusForSignature(String),
     CannotGetTransactionInfo(String),
+    CannotParseTransactionInfo(String),
     CannotParsePubkeyFromString(String),
     CannotGetAssociatedAccount(String),
     CannotCreateAssociatedAccount(String),
@@ -20,6 +21,7 @@ pub enum Error {
     CannotFetchTransaction(String),
     NotARelatedTransactionOfAuthority(String),
     MoreThanOneRelatedInstructionsFoundFrom1Transaction(String),
+    CannotGetSignaturesForAddress(String),
 }
 
 impl std::fmt::Display for Error {
@@ -48,6 +50,9 @@ impl std::fmt::Display for Error {
             Self::CannotGetTransactionInfo(signature) => {
                 write!(f, "cannot get transaction info: {}", signature)
             }
+            Self::CannotParseTransactionInfo(signature) => {
+                write!(f, "cannot parse transaction info: {}", signature)
+            }
             Self::CannotParsePubkeyFromString(pubkey) => {
                 write!(f, "cannot parse public-key from string: {}", pubkey)
             }
@@ -71,6 +76,9 @@ impl std::fmt::Display for Error {
                 "more than 1 related instructions found from the transaction {}",
                 signature
             ),
+            Error::CannotGetSignaturesForAddress(address) => {
+                write!(f, "cannot get signatures for address: {}", address)
+            }
         }
     }
 }
