@@ -76,7 +76,7 @@ impl std::fmt::Display for Error {
                 "more than 1 related instructions found from the transaction {}",
                 signature
             ),
-            Error::CannotGetSignaturesForAddress(address) => {
+            Self::CannotGetSignaturesForAddress(address) => {
                 write!(f, "cannot get signatures for address: {}", address)
             }
         }

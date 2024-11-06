@@ -50,7 +50,7 @@ pub trait TokenClient {
 
 #[derive(Clone)]
 pub struct SolanaClient {
-    pub rpc_client: Arc<RpcClient>,
+    rpc_client: Arc<RpcClient>,
     authority_key: Arc<Keypair>,
     mint_pubkey: Pubkey,
 }
@@ -88,6 +88,18 @@ impl SolanaClient {
         }
         let signature = res.unwrap();
         Ok(signature)
+    }
+
+    pub fn get_balance(&self, address: &Pubkey) -> Result<u64, Error> {
+        self.rpc_client
+            .get_balance(address)
+            .map_err(|_| Error::CannotGetAccountBalance(address.to_string()))
+    }
+
+    pub fn upload_transaction(&self, transaction: &Transaction) -> Result<Signature, Error> {
+        self.rpc_client
+            .send_transaction(transaction)
+            .map_err(|_| Error::CannotSendTransaction)
     }
 
     pub fn get_transactions_related_to_address(
@@ -168,3 +180,6 @@ impl TokenClient for SolanaClient {
         Ok(amount)
     }
 }
+
+
+

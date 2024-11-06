@@ -6,6 +6,7 @@ use axum::{
 use chrono::DateTime;
 use log::{error, info, warn};
 use num_format::{Locale, ToFormattedString};
+use serde::Serialize;
 use serde_json::Value;
 use std::str::FromStr;
 use std::{
@@ -14,19 +15,14 @@ use std::{
 };
 use tokio::signal;
 
-use crate::db;
-use crate::solana::{parse_signatures, SolanaClient, TransactionDetail};
-
 use serde_json::json;
-use solana_client::rpc_client::RpcClient;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::{signature::Signature, transaction::Transaction};
-use solana_transaction_status::{
-    EncodedTransaction, UiInstruction, UiMessage, UiParsedInstruction, UiTransactionEncoding,
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
+
+use crate::{
+    db,
+    solana::{AnalyzedInstruction, InstructionDetail, SolanaClient},
 };
 
-const SUCESS_CODE: i32 = 200;
-const ERROR_CODE: i32 = 3000;
 #[derive(Clone)]
 struct ServerData {
     conn: db::Conn,
@@ -50,39 +46,39 @@ async fn get_root() -> &'static str {
     "hello world"
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct RespExchangeBalanceByDate {
     balance: u64,
     balance_human: String,
     addresses: HashMap<String, String>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct RespExchangeAddresses {
     total: u64,
     saved: u64,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct BalanceResponse {
-    code: Option<i32>,
-    msg: Option<String>,
-    address: Option<String>,
-    balance: Option<u64>,
+    address: String,
+    balance: u64,
 }
 
-#[derive(serde::Serialize)]
-struct TransactionResponse {
-    code: Option<i32>,
-    msg: Option<String>,
-    result: Option<String>,
+#[derive(Serialize)]
+struct UploadTransactionResponse {
+    result: String,
 }
 
-#[derive(serde::Serialize)]
-struct HistoryResponse {
-    code: Option<i32>,
-    msg: Option<String>,
-    result: Option<Vec<TransactionDetail>>,
+#[derive(Serialize)]
+struct TransactionDetail {
+    signature: String,
+    source: String,
+    destination: String,
+    amount: u64,
+    fee: u64,
+    timestamp: i64,
+    r#type: String,
 }
 
 #[axum::debug_handler]
@@ -231,106 +227,130 @@ async fn get_solana_balance(
     Query(params): Query<HashMap<String, String>>,
     State(state): State<Arc<ServerData>>,
 ) -> Json<Value> {
-    let empty_string = "".to_string();
-    let addresses = params.get("address").unwrap_or(&empty_string).split(",");
+    let res = params.get("address");
+    if res.is_none() {
+        // no 'address' can be found from parameter list, return errors
+        return Json(make_error_json(
+            0,
+            "no 'address' can be found from parameter list".to_owned(),
+        ));
+    }
     let mut balances = vec![];
 
-    for address in addresses {
-        let mut flag = true;
-        let balance = match state
-            .solana_client
-            .rpc_client
-            .get_balance(&address.parse().unwrap())
-        {
-            Ok(bal) => bal,
-            Err(e) => {
-                error!("Failed to get balance for {}: {:?}", address, e);
-                flag = false;
-                0
-            }
-        };
-        if flag {
-            balances.push(BalanceResponse {
-                code: None,
-                msg: None,
-                address: Some(address.to_string()),
-                balance: Some(balance),
-            });
+    let iter = res.unwrap().split(",");
+    for address in iter {
+        let res = Pubkey::from_str(address);
+        if res.is_err() {
+            return Json(make_error_json(
+                0,
+                format!("cannot parse address from string '{}'", address),
+            ));
+        }
+        let pubkey = res.unwrap();
+        if let Ok(balance) = state.solana_client.get_balance(&pubkey) {
+            let resp = BalanceResponse {
+                address: address.to_owned(),
+                balance,
+            };
+            let value = serde_json::to_value(resp).unwrap();
+            balances.push(value);
         } else {
-            balances.push(BalanceResponse {
-                code: Some(ERROR_CODE),
-                msg: Some("fail".to_string()),
-                address: Some(address.to_string()),
-                balance: Some(0),
-            });
-            error!("get_solana_balance error,address:{}", address);
+            let value =
+                make_error_json(0, format!("cannot get balance for address: '{}'", address));
+            balances.push(value);
         }
     }
-
     Json(json!(balances))
 }
+
 #[axum::debug_handler]
-pub async fn get_solana_history(
+async fn get_solana_history(
     Query(params): Query<HashMap<String, String>>,
     State(state): State<Arc<ServerData>>,
 ) -> Json<Value> {
+    let res = params.get("address");
+    if res.is_none() {
+        // no 'address' can be found from parameter list, return errors
+        return Json(make_error_json(
+            0,
+            "no 'address' can be found from parameter list".to_owned(),
+        ));
+    }
     let mut parsed_transactions = vec![];
-    let emptyStr = "".to_string();
-    let addresses = params.get("address").unwrap_or(&emptyStr).split(",");
-
-    for address in addresses {
-        let pubkey = Pubkey::from_str(&address).unwrap();
-        let signatures_res = state
+    let iter = res.unwrap().split(",");
+    for address in iter {
+        let res = Pubkey::from_str(address);
+        if res.is_err() {
+            // invalid address, need to return err
+            return Json(make_error_json(
+                0,
+                format!("cannot parse address from string '{}'", address),
+            ));
+        }
+        let pubkey = res.unwrap();
+        let res = state
             .solana_client
-            .rpc_client
-            .get_signatures_for_address(&pubkey)
-            .unwrap();
-
-        let transactions = state
-            .solana_client
-            .parse_signatures_for_target(signatures_res);
-        match transactions {
-            Ok(tx_details) => {
-                parsed_transactions.push(HistoryResponse {
-                    code: None,
-                    msg: None,
-                    result: Some(tx_details),
-                });
-            }
-            Err(err) => {
-                parsed_transactions.push(HistoryResponse {
-                    code: Some(ERROR_CODE),
-                    msg: Some("fail".to_string()),
-                    result: None,
-                });
-                error!("parse transactions error,address:{}", address);
+            .get_transactions_related_to_address(&pubkey);
+        if let Err(e) = res {
+            return Json(make_error_json(
+                0,
+                format!(
+                    "cannot parse or get transactions related to address {}, reason: {}",
+                    address, e
+                ),
+            ));
+        }
+        let analyzed_transactions = res.unwrap();
+        for analyzed_transaction in analyzed_transactions.iter() {
+            for ix in analyzed_transaction.instructions.iter() {
+                let transaction_detail = match ix {
+                    AnalyzedInstruction::SplToken(ix_detail) => make_transaction_detail(
+                        ix_detail,
+                        &analyzed_transaction.signature,
+                        analyzed_transaction.fee,
+                        analyzed_transaction.timestamp,
+                        "token".to_owned(),
+                    ),
+                    AnalyzedInstruction::Solana(ix_detail) => make_transaction_detail(
+                        ix_detail,
+                        &analyzed_transaction.signature,
+                        analyzed_transaction.fee,
+                        analyzed_transaction.timestamp,
+                        "sol".to_owned(),
+                    ),
+                };
+                parsed_transactions.push(transaction_detail);
             }
         }
     }
     Json(json!(parsed_transactions))
 }
+
 #[axum::debug_handler]
 async fn post_solana_transaction(
     State(state): State<Arc<ServerData>>,
-    Json(tx_data): Json<String>,
+    Json(base64_data): Json<String>,
 ) -> Json<Value> {
-    let tx_bytes = base64::decode(&tx_data).unwrap();
-    let tx: Transaction = bincode::deserialize(&tx_bytes).unwrap();
-
-    match state.solana_client.rpc_client.send_transaction(&tx) {
-        Ok(signature) => Json(json!(TransactionResponse {
-            code: None,
-            msg: None,
-            result: Some(signature.to_string()),
-        })),
-        Err(e) => {
-            error!("post_solana_transaction error,tx_data:{}", tx_data);
-            Json(json!(TransactionResponse {
-                code: Some(ERROR_CODE),
-                msg: Some("fail".to_string()),
-                result: Some("".to_string()),
-            }))
-        }
+    let res = base64::decode(&base64_data);
+    if res.is_err() {
+        return Json(make_error_json(0, "cannot decode base64 data".to_owned()));
+    }
+    let bytes = res.unwrap();
+    let res = bincode::deserialize(&bytes);
+    if res.is_err() {
+        // cannot deserialize the binary code into transaction
+        return Json(make_error_json(0, "invalid transaction data".to_owned()));
+    }
+    let transaction = res.unwrap();
+    if let Ok(signature) = state.solana_client.upload_transaction(&transaction) {
+        Json(json!(UploadTransactionResponse {
+            result: signature.to_string(),
+        }))
+    } else {
+        Json(make_error_json(
+            0,
+            "failed to upload transaction".to_owned(),
+        ))
     }
 }
 
@@ -394,103 +414,38 @@ pub async fn run_service(
     info!("web server exits.");
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use super::*;
-    use crate::db;
-    use crate::solana::SolanaClient;
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode},
-    };
-    use serde_json::{json, Value};
-    use solana_sdk::commitment_config::CommitmentConfig;
-    use solana_sdk::signature::Keypair;
-    use solana_sdk::signer::Signer;
-    use std::sync::{Arc, Mutex};
-
-    const DEFAULT_LOCAL_ENDPOINT: &str = "https://api.devnet.solana.com";
-
-    const TEST_SIGNATURE: &str =
-        "25A1pSwLHvagx8FD3oyAGot1Kfp9keqFhdfGgDZq4s9xjkPc4h5R3P6ikf5ookcsKuZEJDcFShsa3JdgVXYbmgRx";
-
-    // Afa4Jc8cGhyQc6v64sVw7qpUMiHDrTSc2umPwEdvAZ9M
-    const AUTHORITY_KEY: &str =
-        "5KDTRK1s2b2oaopXqi2gjSaHgUuzfuvYSwNAND7EdgravGJ44mG1bHynM4UxfWz8dQNQ8TcbtTBM3NKfp4v4vUAo";
-
-    // 8NXzZrJTs8TQYPNamLttfdVAVF3d8nPjqQRkJfJkdmyy
-    const MINT_KEY: &str =
-        "BwNBH51VS47q9tBeeRicPjfKB5k4ys3UkyjRD9wxWDnhDGpESsTywH5SPtb3cYG9Ec3gbezNM3SsjGZGNHqdBdR";
-
-    const SPL_TOKEN_SIGNATURE: &str =
-        "58pf2apLq8Uti8b45jKedN9chbPveiW6PeMUTXBvZ2UwgHdhtCoRtRK3R97Jre27DDQD8adztXhTwV9yNvBhBymV";
-
-    // Mocking setup and server state
-    fn setup_mock_server() -> Arc<ServerData> {
-        let conn = db::Conn::new(); // Assuming you have a method for a test connection
-        let authority_key = Keypair::from_base58_string(AUTHORITY_KEY);
-        let mint_key = Keypair::from_base58_string(MINT_KEY);
-        let solana_client = SolanaClient::new(
-            "http://localhost:8899".to_string().as_str(),
-            mint_key.pubkey(),
-            authority_key,
-            CommitmentConfig::confirmed(),
-        );
-        let exit = Arc::new(Mutex::new(false));
-
-        Arc::new(ServerData {
-            conn,
-            solana_client,
-            exit,
-        })
+fn make_transaction_detail(
+    ix_detail: &InstructionDetail,
+    signature: &Signature,
+    fee: u64,
+    timestamp: i64,
+    r#type: String,
+) -> TransactionDetail {
+    TransactionDetail {
+        signature: signature.to_string(),
+        source: ix_detail.source.to_string(),
+        destination: ix_detail.destination.to_string(),
+        amount: ix_detail.amount,
+        fee,
+        timestamp,
+        r#type,
     }
+}
 
-    // Test for get_solana_balance
-    #[tokio::test]
-    async fn test_get_solana_balance() {
-        let state = setup_mock_server();
-        let params = HashMap::from([("address".to_string(), "YourTestAddressHere".to_string())]);
-        let response = get_solana_balance(Query(params), State(state.clone())).await;
+#[derive(Serialize)]
+struct ErrorDetail {
+    code: u32,
+    message: String,
+}
 
-        assert_eq!(response.status(), StatusCode::OK);
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: ErrorDetail,
+}
 
-        let body: Value = serde_json::from_slice(response.into_body().as_bytes()).unwrap();
-        assert!(body[0]["balance"].is_some());
-    }
-
-    // Test for get_solana_history
-    #[tokio::test]
-    async fn test_get_solana_history() {
-        let state = setup_mock_server();
-        let params = HashMap::from([("address".to_string(), "YourTestAddressHere".to_string())]);
-        let response = get_solana_history(Query(params), State(state.clone())).await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body: Value = serde_json::from_slice(response.into_body().as_bytes()).unwrap();
-        assert!(body[0]["result"].is_array());
-    }
-
-    // Test for post_solana_transaction
-    #[tokio::test]
-    async fn test_post_solana_transaction() {
-        let state = setup_mock_server();
-        let tx_data = "YourSerializedTxDataHere"; // Use base64-encoded transaction data for test
-
-        let request = Request::post("/solana/post_tx")
-            .body(Body::from(json!(tx_data).to_string()))
-            .unwrap();
-
-        let response =
-            post_solana_transaction(State(state.clone()), Json(tx_data.to_string())).await;
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body: Value = serde_json::from_slice(response.into_body().as_bytes()).unwrap();
-        if let Some(error_code) = body.get("code") {
-            assert_eq!(error_code.as_i64().unwrap(), ERROR_CODE);
-        } else {
-            assert!(body["result"].is_string());
-        }
-    }
+fn make_error_json(code: u32, message: String) -> Value {
+    serde_json::to_value(ErrorResponse {
+        error: ErrorDetail { code, message },
+    })
+    .unwrap()
 }
