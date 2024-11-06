@@ -1,8 +1,3 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use std::str::FromStr;
 use axum::{
     extract::{Path, Query, State},
     routing::{get, post},
@@ -12,20 +7,26 @@ use chrono::DateTime;
 use log::{error, info, warn};
 use num_format::{Locale, ToFormattedString};
 use serde_json::Value;
+use std::str::FromStr;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use tokio::signal;
 
 use crate::db;
-use crate::solana::SolanaClient;
+use crate::solana::{parse_signatures_for_target, SolanaClient, TransactionDetail};
 
 use serde_json::json;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{signature::Signature, transaction::Transaction};
-use solana_transaction_status::{EncodedTransaction, UiInstruction, UiMessage, UiParsedInstruction, UiTransactionEncoding};
+use solana_transaction_status::{
+    EncodedTransaction, UiInstruction, UiMessage, UiParsedInstruction, UiTransactionEncoding,
+};
 
-
-const SUCESS_CODE:i32 = 200;
-const ERROR_CODE:i32 = 3000;
+const SUCESS_CODE: i32 = 200;
+const ERROR_CODE: i32 = 3000;
 #[derive(Clone)]
 struct ServerData {
     conn: db::Conn,
@@ -64,30 +65,25 @@ struct RespExchangeAddresses {
 
 #[derive(serde::Serialize)]
 struct BalanceResponse {
-    code: i32,
-    msg: String,
-    address: String,
-    balance: u64,
+    code: Option<i32>,
+    msg: Option<String>,
+    address: Option<String>,
+    balance: Option<u64>,
 }
 
 #[derive(serde::Serialize)]
 struct TransactionResponse {
-    code: i32,
-    msg: String,
-    result: String,
+    code: Option<i32>,
+    msg: Option<String>,
+    result: Option<String>,
 }
 
 #[derive(serde::Serialize)]
-struct TransactionDetailResponse {
-    signature: String,
-    source: String,
-    destination: String,
-    amount: u64,
-    fee: u64,
-    timestamp: u64,
-    tx_type: String,
+struct HistoryResponse {
+    code: Option<i32>,
+    msg: Option<String>,
+    result: Option<Vec<TransactionDetail>>,
 }
-
 
 #[axum::debug_handler]
 async fn get_exchange_addresses(
@@ -255,17 +251,17 @@ async fn get_solana_balance(
         };
         if flag {
             balances.push(BalanceResponse {
-                code:SUCESS_CODE,
-                msg:"success".to_string(),
-                address: address.to_string(),
-                balance,
+                code: None,
+                msg: None,
+                address: Some(address.to_string()),
+                balance: Some(balance),
             });
-        }else {
+        } else {
             balances.push(BalanceResponse {
-                code:ERROR_CODE,
-                msg:"fail".to_string(),
-                address: address.to_string(),
-                balance:0,
+                code: Some(ERROR_CODE),
+                msg: Some("fail".to_string()),
+                address: Some(address.to_string()),
+                balance: Some(0),
             });
         }
     }
@@ -283,81 +279,32 @@ pub async fn get_solana_history(
 
     for address in addresses {
         let pubkey = Pubkey::from_str(&address).unwrap();
-        let signatures_res = state.solana_client.rpc_client.get_signatures_for_address(&pubkey).unwrap();
+        let signatures_res = state
+            .solana_client
+            .rpc_client
+            .get_signatures_for_address(&pubkey)
+            .unwrap();
 
-        for signature_info in signatures_res {
-            let signature = Signature::from_str(&signature_info.signature).unwrap();
-            let transaction_meta_res =
-                state.solana_client.rpc_client.get_transaction(&signature, UiTransactionEncoding::JsonParsed);
-
-            if let Ok(transaction_meta) = transaction_meta_res {
-                // Access fee from the transaction's meta field
-                let fee = transaction_meta.transaction.meta.as_ref().map_or(0, |meta| meta.fee);
-
-                let transaction = &transaction_meta.transaction.transaction;
-
-                if let EncodedTransaction::Json(transaction) = transaction {
-                    if let UiMessage::Parsed(message) = &transaction.message {
-                        for instruction in message.instructions.iter() {
-                            if let UiInstruction::Parsed(UiParsedInstruction::Parsed(instruction)) =
-                                instruction
-                            {
-                                let ty = instruction.parsed["type"].as_str().unwrap_or("");
-
-                                if ty == "transfer" {
-                                    let program_id = Pubkey::from_str(&instruction.program_id).unwrap();
-
-                                    if program_id == solana_sdk::system_program::id() {
-                                        // SOL transfer
-                                        let source = instruction.parsed["info"]["source"]
-                                            .as_str()
-                                            .unwrap_or_default()
-                                            .to_string();
-                                        let destination = instruction.parsed["info"]["destination"]
-                                            .as_str()
-                                            .unwrap_or_default()
-                                            .to_string();
-                                        let amount = instruction.parsed["info"]["lamports"]
-                                            .as_str()
-                                            .unwrap_or("0")
-                                            .parse::<u64>()
-                                            .unwrap_or(0);
-
-                                        parsed_transactions.push(TransactionDetailResponse {
-                                            signature: signature.to_string(),
-                                            source,
-                                            destination,
-                                            amount,
-                                            fee,
-                                            timestamp: signature_info.block_time.unwrap_or(0) as u64,
-                                            tx_type: "sol".to_string(),
-                                        });
-                                    } else if program_id == spl_token::id() {
-                                        // SPL Token transfer
-                                        let info = &instruction.parsed["info"];
-                                        let source = info["source"].as_str().unwrap_or_default().to_string();
-                                        let destination = info["destination"].as_str().unwrap_or_default().to_string();
-                                        let amount = info["amount"].as_str().unwrap_or("0").parse::<u64>().unwrap_or(0);
-
-                                        parsed_transactions.push(TransactionDetailResponse {
-                                            signature: signature.to_string(),
-                                            source,
-                                            destination,
-                                            amount,
-                                            fee,
-                                            timestamp: signature_info.block_time.unwrap_or(0) as u64,
-                                            tx_type: "token".to_string(),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        let transactions = state
+            .solana_client
+            .parse_signatures_for_target(signatures_res);
+        match transactions {
+            Ok(tx_details) => {
+                parsed_transactions.push(HistoryResponse{
+                    code: None,
+                    msg: None,
+                    result: Some(tx_details)
+                });
+            }
+            Err(err) => {
+                parsed_transactions.push(HistoryResponse{
+                    code: Some(ERROR_CODE),
+                    msg: Some("fail".to_string()),
+                    result: None
+                });
             }
         }
     }
-
     Json(json!(parsed_transactions))
 }
 #[axum::debug_handler]
@@ -370,14 +317,14 @@ async fn post_solana_transaction(
 
     match state.solana_client.rpc_client.send_transaction(&tx) {
         Ok(signature) => Json(json!(TransactionResponse {
-            code:SUCESS_CODE,
-            msg:"success".to_string(),
-            result: signature.to_string(),
+            code: None,
+            msg: None,
+            result: Some(signature.to_string()),
         })),
         Err(e) => Json(json!(TransactionResponse {
-            code:ERROR_CODE,
-            msg:"fail".to_string(),
-            result: "".to_string(),
+            code: Some(ERROR_CODE),
+            msg: Some("fail".to_string()),
+            result: Some("".to_string()),
         })),
     }
 }

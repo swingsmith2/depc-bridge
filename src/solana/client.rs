@@ -1,10 +1,11 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::solana::parse_tpl_token_signature;
+use crate::solana::{parse_signatures_for_target, parse_tpl_token_signature, parse_tpl_token_signature_for_target, TransactionDetail};
 
 use super::{send_token, Error};
 use solana_client::rpc_client::RpcClient;
+use solana_client::rpc_response::RpcConfirmedTransactionStatusWithSignature;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
@@ -90,6 +91,14 @@ impl SolanaClient {
         let signature = res.unwrap();
         Ok(signature)
     }
+
+    pub fn parse_signatures_for_target(
+        &self,
+        signatures: Vec<RpcConfirmedTransactionStatusWithSignature>,
+    ) -> Result<Vec<TransactionDetail>, Error>
+    {
+        parse_signatures_for_target(self.rpc_client.as_ref(), signatures)
+    }
 }
 
 impl TokenClient for SolanaClient {
@@ -114,7 +123,7 @@ impl TokenClient for SolanaClient {
     }
 
     fn verify(&self, signature: &Signature, owner: &Pubkey) -> Result<Self::Amount, Self::Error> {
-        let records = parse_tpl_token_signature(&self.rpc_client, signature, owner)?;
+        let records = parse_tpl_token_signature_for_target(&self.rpc_client, signature, owner)?;
         if records.is_empty() {
             return Err(Error::NotARelatedTransactionOfAuthority(
                 signature.to_string(),
