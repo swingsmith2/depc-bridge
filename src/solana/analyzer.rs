@@ -123,19 +123,11 @@ impl<'a> TransactionAnalyzer<'a> {
 }
 
 fn parse_pubkey(s: &str) -> Result<Pubkey, Error> {
-    if let Ok(pubkey) = Pubkey::from_str(s) {
-        Ok(pubkey)
-    } else {
-        Err(Error::CannotParsePubkey)
-    }
+    Pubkey::from_str(s).map_err(|_| Error::CannotParsePubkey)
 }
 
 fn parse_number(s: &str) -> Result<u64, Error> {
-    if let Ok(n) = s.parse() {
-        Ok(n)
-    } else {
-        Err(Error::CannotParseNumber)
-    }
+    s.parse().map_err(|_| Error::CannotParseNumber)
 }
 
 fn parse_instruction(instruction: &ParsedInstruction) -> Result<Instruction, Error> {
