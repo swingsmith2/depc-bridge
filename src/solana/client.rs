@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::solana::{parse_signatures_for_target, parse_tpl_token_signature, parse_tpl_token_signature_for_target, TransactionDetail};
+use crate::solana::{parse_signatures, parse_tpl_token_signature, parse_tpl_token_signature_for_target, TransactionDetail};
 
 use super::{send_token, Error};
 use solana_client::rpc_client::RpcClient;
@@ -97,7 +97,7 @@ impl SolanaClient {
         signatures: Vec<RpcConfirmedTransactionStatusWithSignature>,
     ) -> Result<Vec<TransactionDetail>, Error>
     {
-        parse_signatures_for_target(self.rpc_client.as_ref(), signatures)
+        parse_signatures(self.rpc_client.as_ref(), signatures)
     }
 }
 
@@ -247,4 +247,44 @@ mod tests {
         let balance = get_token_balance(&rpc_client, &mint_pubkey, &target_pubkey).unwrap();
         assert!(balance >= TRANSFER_LAMPORTS);
     }
+
+    #[test]
+    fn test_verify() {
+        let rpc_client = RpcClient::new_with_commitment(ENDPOINT_DEVNET, CommitmentConfig::confirmed());
+
+        // Initialize the authority keypair and mint public key
+        let authority_key = Keypair::from_base58_string(AUTHORITY_KEY);
+        let mint_pubkey = Pubkey::from_str(MINT_KEY).unwrap();
+
+        // Create an instance of the SolanaClient with test parameters
+        let client = SolanaClient::new(
+            ENDPOINT_DEVNET,
+            mint_pubkey,
+            authority_key.clone(),
+            CommitmentConfig::confirmed(),
+        );
+
+        // Define a sample signature and owner (authority) public key for the verification test
+        let mock_signature = Signature::from_str("MOCK_SIGNATURE_STRING_HERE").unwrap();
+        let owner_pubkey = authority_key.pubkey();
+
+        // Attempt to verify the transaction using `verify`
+        match client.verify(&mock_signature, &owner_pubkey) {
+            Ok(amount) => {
+                // If verification is successful, assert that the returned amount is as expected
+                println!("Verified transaction amount: {}", amount);
+                assert!(amount > 0, "Amount should be greater than zero for a valid transaction");
+            }
+            Err(e) => {
+                // Handle the error if the transaction verification fails
+                println!("Verification failed with error: {:?}", e);
+                assert!(matches!(
+                e,
+                Error::NotARelatedTransactionOfAuthority(_)
+                    | Error::MoreThanOneRelatedInstructionsFoundFrom1Transaction(_)
+            ));
+            }
+        }
+    }
+
 }

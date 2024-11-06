@@ -15,7 +15,7 @@ use std::{
 use tokio::signal;
 
 use crate::db;
-use crate::solana::{parse_signatures_for_target, SolanaClient, TransactionDetail};
+use crate::solana::{parse_signatures, SolanaClient, TransactionDetail};
 
 use serde_json::json;
 use solana_client::rpc_client::RpcClient;
@@ -388,3 +388,96 @@ pub async fn run_service(
 
     info!("web server exits.");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::{Request, StatusCode}};
+    use serde_json::{json, Value};
+    use std::sync::{Arc, Mutex};
+    use solana_sdk::commitment_config::CommitmentConfig;
+    use solana_sdk::signature::Keypair;
+    use solana_sdk::signer::Signer;
+    use crate::db;
+    use crate::solana::SolanaClient;
+    use super::*;
+
+    const DEFAULT_LOCAL_ENDPOINT: &str = "https://api.devnet.solana.com";
+
+    const TEST_SIGNATURE: &str =
+        "25A1pSwLHvagx8FD3oyAGot1Kfp9keqFhdfGgDZq4s9xjkPc4h5R3P6ikf5ookcsKuZEJDcFShsa3JdgVXYbmgRx";
+
+    // Afa4Jc8cGhyQc6v64sVw7qpUMiHDrTSc2umPwEdvAZ9M
+    const AUTHORITY_KEY: &str =
+        "5KDTRK1s2b2oaopXqi2gjSaHgUuzfuvYSwNAND7EdgravGJ44mG1bHynM4UxfWz8dQNQ8TcbtTBM3NKfp4v4vUAo";
+
+    // 8NXzZrJTs8TQYPNamLttfdVAVF3d8nPjqQRkJfJkdmyy
+    const MINT_KEY: &str =
+        "BwNBH51VS47q9tBeeRicPjfKB5k4ys3UkyjRD9wxWDnhDGpESsTywH5SPtb3cYG9Ec3gbezNM3SsjGZGNHqdBdR";
+
+    const SPL_TOKEN_SIGNATURE: &str =
+        "58pf2apLq8Uti8b45jKedN9chbPveiW6PeMUTXBvZ2UwgHdhtCoRtRK3R97Jre27DDQD8adztXhTwV9yNvBhBymV";
+
+    // Mocking setup and server state
+    fn setup_mock_server() -> Arc<ServerData> {
+        let conn = db::Conn::new(); // Assuming you have a method for a test connection
+        let authority_key = Keypair::from_base58_string(AUTHORITY_KEY);
+        let mint_key = Keypair::from_base58_string(MINT_KEY);
+        let solana_client = SolanaClient::new("http://localhost:8899".to_string().as_str(),mint_key.pubkey(),authority_key,CommitmentConfig::confirmed());
+        let exit = Arc::new(Mutex::new(false));
+
+        Arc::new(ServerData {
+            conn,
+            solana_client,
+            exit,
+        })
+    }
+
+    // Test for get_solana_balance
+    #[tokio::test]
+    async fn test_get_solana_balance() {
+        let state = setup_mock_server();
+        let params = HashMap::from([("address".to_string(), "YourTestAddressHere".to_string())]);
+        let response = get_solana_balance(Query(params), State(state.clone())).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body: Value = serde_json::from_slice(response.into_body().as_bytes()).unwrap();
+        assert!(body[0]["balance"].is_some());
+    }
+
+    // Test for get_solana_history
+    #[tokio::test]
+    async fn test_get_solana_history() {
+        let state = setup_mock_server();
+        let params = HashMap::from([("address".to_string(), "YourTestAddressHere".to_string())]);
+        let response = get_solana_history(Query(params), State(state.clone())).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body: Value = serde_json::from_slice(response.into_body().as_bytes()).unwrap();
+        assert!(body[0]["result"].is_array());
+    }
+
+    // Test for post_solana_transaction
+    #[tokio::test]
+    async fn test_post_solana_transaction() {
+        let state = setup_mock_server();
+        let tx_data = "YourSerializedTxDataHere"; // Use base64-encoded transaction data for test
+
+        let request = Request::post("/solana/post_tx")
+            .body(Body::from(json!(tx_data).to_string()))
+            .unwrap();
+
+        let response = post_solana_transaction(State(state.clone()), Json(tx_data.to_string())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body: Value = serde_json::from_slice(response.into_body().as_bytes()).unwrap();
+        if let Some(error_code) = body.get("code") {
+            assert_eq!(error_code.as_i64().unwrap(), ERROR_CODE);
+        } else {
+            assert!(body["result"].is_string());
+        }
+    }
+}
+

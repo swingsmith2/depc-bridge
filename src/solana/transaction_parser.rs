@@ -85,19 +85,23 @@ pub fn parse_tpl_token_signature(
     Ok(tpl_token_txs)
 }
 
-pub fn parse_signatures_for_target(
+pub fn parse_signatures(
     rpc_client: &RpcClient,
     signatures: Vec<RpcConfirmedTransactionStatusWithSignature>,
-) -> Result<Vec<TransactionDetail>, Error>
-{
+) -> Result<Vec<TransactionDetail>, Error> {
     let mut parsed_transactions = vec![];
     for signature_info in signatures {
         let signature = Signature::from_str(&signature_info.signature).unwrap();
-        let transaction_meta_res= rpc_client.get_transaction(&signature, UiTransactionEncoding::JsonParsed);
+        let transaction_meta_res =
+            rpc_client.get_transaction(&signature, UiTransactionEncoding::JsonParsed);
 
         if let Ok(transaction_meta) = transaction_meta_res {
             // Access fee from the transaction's meta field
-            let fee = transaction_meta.transaction.meta.as_ref().map_or(0, |meta| meta.fee);
+            let fee = transaction_meta
+                .transaction
+                .meta
+                .as_ref()
+                .map_or(0, |meta| meta.fee);
 
             let transaction = &transaction_meta.transaction.transaction;
 
@@ -140,9 +144,17 @@ pub fn parse_signatures_for_target(
                                 } else if program_id == spl_token::id() {
                                     // SPL Token transfer
                                     let info = &instruction.parsed["info"];
-                                    let source = info["source"].as_str().unwrap_or_default().to_string();
-                                    let destination = info["destination"].as_str().unwrap_or_default().to_string();
-                                    let amount = info["amount"].as_str().unwrap_or("0").parse::<u64>().unwrap_or(0);
+                                    let source =
+                                        info["source"].as_str().unwrap_or_default().to_string();
+                                    let destination = info["destination"]
+                                        .as_str()
+                                        .unwrap_or_default()
+                                        .to_string();
+                                    let amount = info["amount"]
+                                        .as_str()
+                                        .unwrap_or("0")
+                                        .parse::<u64>()
+                                        .unwrap_or(0);
 
                                     parsed_transactions.push(TransactionDetail {
                                         signature: signature.to_string(),
@@ -219,6 +231,7 @@ mod tests {
     use std::str::FromStr;
 
     use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair, signer::Signer};
+    use solana_transaction_status::TransactionConfirmationStatus;
     use spl_associated_token_account::get_associated_token_address;
 
     use super::*;
@@ -256,4 +269,63 @@ mod tests {
             parse_tpl_token_signature(&rpc_client, &signature, &associated_pubkey).unwrap();
         assert!(!records.is_empty());
     }
+
+    #[test]
+    fn test_parse_signatures() {
+        let rpc_client =
+            RpcClient::new_with_commitment(DEFAULT_LOCAL_ENDPOINT, CommitmentConfig::confirmed());
+
+        // Assume we have multiple test signatures for validation
+        let test_signatures = vec![
+            RpcConfirmedTransactionStatusWithSignature {
+                signature: TEST_SIGNATURE.to_string(),
+                slot: 123456,
+                err: None,
+                memo: None,
+                block_time: Some(1672531199), // Sample timestamp
+                confirmation_status: Some(TransactionConfirmationStatus::Confirmed),
+            },
+            // Additional test signatures can be added here to verify more scenarios
+        ];
+
+        // Call parse_signatures function and assert the result
+        let parsed_transactions = parse_signatures(&rpc_client, test_signatures).unwrap();
+
+        // Verify that the parsed transactions are not empty
+        assert!(!parsed_transactions.is_empty(), "Parsed transactions should not be empty");
+
+        // Further check that the first transaction's details match the expected values
+        let first_transaction = &parsed_transactions[0];
+        assert_eq!(first_transaction.signature, TEST_SIGNATURE, "Signature should match the test signature");
+        assert!(first_transaction.fee > 0, "Fee should be greater than zero");
+        assert!(first_transaction.timestamp > 0, "Timestamp should be greater than zero");
+    }
+
+    #[test]
+    fn test_parse_tpl_token_signature_for_target() {
+        let rpc_client =
+            RpcClient::new_with_commitment(DEFAULT_LOCAL_ENDPOINT, CommitmentConfig::confirmed());
+
+        let authority_key = Keypair::from_base58_string(AUTHORITY_KEY);
+        let mint_key = Keypair::from_base58_string(MINT_KEY);
+
+        // Generate the token address associated with authority_key and mint_key
+        let associated_pubkey = get_associated_token_address(&authority_key.pubkey(), &mint_key.pubkey());
+
+        let signature = Signature::from_str(SPL_TOKEN_SIGNATURE).unwrap();
+
+        // Call parse_tpl_token_signature_for_target and assert the result
+        let tpl_token_transactions =
+            parse_tpl_token_signature_for_target(&rpc_client, &signature, &associated_pubkey).unwrap();
+
+        // Verify that the tpl_token_transactions list is not empty
+        assert!(!tpl_token_transactions.is_empty(), "TPL token transactions should not be empty");
+
+        // Further check that the first tpl_token transaction's details match the expected values
+        let first_tpl_tx = &tpl_token_transactions[0];
+        assert_eq!(first_tpl_tx.destination, associated_pubkey, "Source should match the associated public key");
+        assert!(first_tpl_tx.amount > 0, "Amount should be greater than zero");
+    }
+
+
 }
