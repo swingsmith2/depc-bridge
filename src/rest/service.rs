@@ -263,6 +263,7 @@ async fn get_solana_balance(
                 address: Some(address.to_string()),
                 balance: Some(0),
             });
+            error!("get_solana_balance error,address:{}", address);
         }
     }
 
@@ -290,18 +291,19 @@ pub async fn get_solana_history(
             .parse_signatures_for_target(signatures_res);
         match transactions {
             Ok(tx_details) => {
-                parsed_transactions.push(HistoryResponse{
+                parsed_transactions.push(HistoryResponse {
                     code: None,
                     msg: None,
-                    result: Some(tx_details)
+                    result: Some(tx_details),
                 });
             }
             Err(err) => {
-                parsed_transactions.push(HistoryResponse{
+                parsed_transactions.push(HistoryResponse {
                     code: Some(ERROR_CODE),
                     msg: Some("fail".to_string()),
-                    result: None
+                    result: None,
                 });
+                error!("parse transactions error,address:{}", address);
             }
         }
     }
@@ -321,11 +323,14 @@ async fn post_solana_transaction(
             msg: None,
             result: Some(signature.to_string()),
         })),
-        Err(e) => Json(json!(TransactionResponse {
-            code: Some(ERROR_CODE),
-            msg: Some("fail".to_string()),
-            result: Some("".to_string()),
-        })),
+        Err(e) => {
+            error!("post_solana_transaction error,tx_data:{}", tx_data);
+            Json(json!(TransactionResponse {
+                code: Some(ERROR_CODE),
+                msg: Some("fail".to_string()),
+                result: Some("".to_string()),
+            }))
+        }
     }
 }
 
@@ -392,15 +397,18 @@ pub async fn run_service(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}};
+    use super::*;
+    use crate::db;
+    use crate::solana::SolanaClient;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use serde_json::{json, Value};
-    use std::sync::{Arc, Mutex};
     use solana_sdk::commitment_config::CommitmentConfig;
     use solana_sdk::signature::Keypair;
     use solana_sdk::signer::Signer;
-    use crate::db;
-    use crate::solana::SolanaClient;
-    use super::*;
+    use std::sync::{Arc, Mutex};
 
     const DEFAULT_LOCAL_ENDPOINT: &str = "https://api.devnet.solana.com";
 
@@ -423,7 +431,12 @@ mod tests {
         let conn = db::Conn::new(); // Assuming you have a method for a test connection
         let authority_key = Keypair::from_base58_string(AUTHORITY_KEY);
         let mint_key = Keypair::from_base58_string(MINT_KEY);
-        let solana_client = SolanaClient::new("http://localhost:8899".to_string().as_str(),mint_key.pubkey(),authority_key,CommitmentConfig::confirmed());
+        let solana_client = SolanaClient::new(
+            "http://localhost:8899".to_string().as_str(),
+            mint_key.pubkey(),
+            authority_key,
+            CommitmentConfig::confirmed(),
+        );
         let exit = Arc::new(Mutex::new(false));
 
         Arc::new(ServerData {
@@ -469,7 +482,8 @@ mod tests {
             .body(Body::from(json!(tx_data).to_string()))
             .unwrap();
 
-        let response = post_solana_transaction(State(state.clone()), Json(tx_data.to_string())).await;
+        let response =
+            post_solana_transaction(State(state.clone()), Json(tx_data.to_string())).await;
         assert_eq!(response.status(), StatusCode::OK);
 
         let body: Value = serde_json::from_slice(response.into_body().as_bytes()).unwrap();
@@ -480,4 +494,3 @@ mod tests {
         }
     }
 }
-
